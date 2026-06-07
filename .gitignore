@@ -1,0 +1,109 @@
+# ─────────────────────────────────────────
+# JAVA / SPRING BOOT
+# ─────────────────────────────────────────
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+
+# Build output
+build/
+out/
+target/
+
+# Spring Boot specific
+spring-shell.log
+
+# ─────────────────────────────────────────
+# GRADLE
+# ─────────────────────────────────────────
+.gradle/
+gradle-app.setting
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/gradle/
+!**/src/test/**/gradle/
+
+# ─────────────────────────────────────────
+# NODE / REACT / VITE
+# ─────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# ─────────────────────────────────────────
+# ENVIRONMENT & SECRETS — NEVER COMMIT THESE
+# ─────────────────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# AWS credentials
+.aws/
+aws-exports.js
+
+# ─────────────────────────────────────────
+# IDEs & EDITORS
+# ─────────────────────────────────────────
+
+# IntelliJ / IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+# ─────────────────────────────────────────
+# OS
+# ─────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ─────────────────────────────────────────
+# LOGS
+# ─────────────────────────────────────────
+*.log
+logs/
+log/
+
+# ─────────────────────────────────────────
+# MISC
+# ─────────────────────────────────────────
+*.orig
+*.bak
+*.swp
+*.tmp
