@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: url-shortener
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# Application-specific configuration. All values are overridable via environment
+# variables (Lambda env vars in deployment) — never hardcode real endpoints here.
+app:
+  aws:
+    region: ${AWS_REGION:us-east-1}
+  dynamodb:
+    table-name: ${DYNAMODB_TABLE_NAME:url-mappings}
+  short-url:
+    base: ${BASE_SHORT_URL:https://myapp.io}

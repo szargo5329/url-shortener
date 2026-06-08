@@ -421,3 +421,205 @@ This guard is needed because DynamoDB TTL deletion has up to a 48h delay — an 
 | DynamoDB | Native TTL attribute | No — enable at table level, store Unix timestamp |
 | Application | Check `expires_at` on every lookup | Yes — ~3 lines, return 404 if expired |
 
+
+---
+
+## 16. Security
+
+> This section is **not optional**. The application is publicly deployed on the internet. Every item here must be implemented before the application is considered production-ready.
+
+---
+
+### 16.1 API Gateway Throttling
+
+API Gateway has built-in rate limiting. Configure at the stage level to protect against abuse and runaway billing.
+
+**Settings to apply:**
+```
+Default throttling:
+  Rate:  50 requests/second
+  Burst: 100 requests
+
+Per-route overrides (optional but recommended):
+  POST /shorten: 10 requests/second  (creation is more expensive)
+  GET /{code}:   50 requests/second  (redirects should be fast)
+```
+
+This is configured in API Gateway → Stages → Default Route Throttling. No extra cost.
+
+---
+
+### 16.2 Input Validation (SSRF Protection)
+
+Beyond rejecting malformed URLs, the shorten Lambda must block URLs that could be used in a **Server-Side Request Forgery (SSRF)** attack. SSRF is when an attacker submits an internal/private URL and your server makes a request to it on their behalf.
+
+**Example attack:** Submitting `http://169.254.169.254/latest/meta-data/` would cause your Lambda to hit the AWS instance metadata endpoint, potentially leaking credentials.
+
+**Block the following:**
+```java
+// Reject these schemes entirely
+Disallow: file://, ftp://, javascript://, data://, vbscript://
+Allow only: http://, https://
+
+// Reject private/internal IP ranges
+10.0.0.0/8        (private network)
+172.16.0.0/12     (private network)
+192.168.0.0/16    (private network)
+127.0.0.0/8       (loopback)
+169.254.0.0/16    (AWS metadata endpoint — critical to block)
+::1               (IPv6 loopback)
+
+// Reject localhost variants
+localhost
+127.0.0.1
+0.0.0.0
+
+// Enforce URL length limit
+Max URL length: 2048 characters
+```
+
+**Validation order in ShortenService:**
+1. Null/empty check
+2. Length check (≤ 2048 chars)
+3. Scheme check (must be http:// or https://)
+4. URL format check (must parse as valid URL)
+5. Host resolution + private IP range check
+
+Return `400 Bad Request` with a generic message (`"Invalid URL"`) for all failures — do not reveal which specific check failed, as that gives attackers information.
+
+---
+
+### 16.3 CORS Configuration
+
+CORS (Cross-Origin Resource Sharing) controls which domains are allowed to call your API from a browser. Without correct CORS config your frontend cannot call your backend. With overly permissive CORS any website on the internet can call your API.
+
+**Configure on API Gateway:**
+```
+Access-Control-Allow-Origin:  https://www.myapp.io   ← your frontend domain only, NOT *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
+Access-Control-Max-Age:       86400
+```
+
+**Never use `*` as the Allow-Origin on a production API.** It allows any website to make requests to your endpoints on behalf of their users.
+
+Also handle **OPTIONS preflight requests** — browsers send an OPTIONS request before POST requests to check CORS policy. API Gateway must respond to OPTIONS on all routes with the correct headers or your frontend calls will be blocked.
+
+---
+
+### 16.4 HTTPS Enforcement
+
+All traffic must be encrypted in transit. Never serve anything over plain HTTP.
+
+**CloudFront:**
+- Set viewer protocol policy to **Redirect HTTP to HTTPS** — not "Allow Both"
+- This ensures anyone who types `http://www.myapp.io` gets silently upgraded to HTTPS
+
+**API Gateway:**
+- HTTPS only by default — no action needed
+
+**ACM (AWS Certificate Manager):**
+- Provision a free SSL/TLS certificate via ACM for your domain
+- Attach to CloudFront distribution and API Gateway custom domain
+- ACM certificates auto-renew — no manual renewal needed
+
+---
+
+### 16.5 IAM Least Privilege
+
+Each Lambda function gets its own IAM execution role with the **minimum permissions required and nothing more**. This limits blast radius if a function is ever compromised.
+
+| Lambda | DynamoDB permissions | Other |
+|--------|---------------------|-------|
+| λ shorten | `dynamodb:PutItem` | — |
+| λ redirect | `dynamodb:GetItem` | ElastiCache access via VPC security group |
+| λ analytics | `dynamodb:PutItem` | `sqs:ReceiveMessage`, `sqs:DeleteMessage` |
+
+**Never:**
+- Use `dynamodb:*` wildcard permissions
+- Use your personal AWS root account credentials in Lambda
+- Attach `AdministratorAccess` to any Lambda role
+
+**DynamoDB resource policy:**
+Restrict table access so only the three Lambda execution roles can interact with it. No other AWS principal should have access.
+
+---
+
+### 16.6 Environment Variables & Secrets
+
+**Never hardcode in source code:**
+- AWS region, table names, Redis endpoint, any URLs or keys
+
+**Lambda environment variables:**
+- Stored encrypted at rest by AWS by default (AES-256)
+- Set via Lambda console or IaC — never in code
+
+**GitHub Actions secrets:**
+- All AWS credentials used in CI/CD go in GitHub repo Settings → Secrets and variables → Actions
+- Reference in workflow files as `${{ secrets.AWS_ACCESS_KEY_ID }}` — never paste values directly in YAML
+
+**Local development:**
+- Use a `.env` file locally (already in `.gitignore`)
+- Never commit `.env` to Git under any circumstances
+- If a secret is ever accidentally committed, treat it as compromised immediately — rotate it, don't just delete the file
+
+---
+
+### 16.7 AWS Budget Alert
+
+Set this up **before deploying anything**. Protects against unexpected bills from attacks, misconfiguration, or runaway Lambda invocations.
+
+**Setup:**
+1. AWS Console → Billing and Cost Management → Budgets
+2. Create a monthly cost budget
+3. Set amount: **$10**
+4. Add alert threshold: 80% of budget (~$8)
+5. Add your email as the notification recipient
+
+This is not a hard limit — AWS will not stop your services when the threshold is hit. It just emails you so you can investigate and respond before costs escalate further.
+
+Also enable **AWS Cost Explorer** to get a visual breakdown of spend by service.
+
+---
+
+### 16.8 Security Group for ElastiCache
+
+ElastiCache lives in a private subnet but still needs a security group to control which resources can connect to it.
+
+**ElastiCache security group inbound rules:**
+```
+Type:       Custom TCP
+Port:       6379  (Redis default port)
+Source:     Security group of λ redirect only
+```
+
+This means only your redirect Lambda can reach Redis on port 6379. Nothing else — not other Lambdas, not the internet, nothing.
+
+**λ redirect security group outbound rules:**
+```
+Type:       Custom TCP
+Port:       6379
+Destination: ElastiCache security group
+```
+
+This is the principle of least privilege applied at the network level — not just IAM permissions but actual network-level restrictions.
+
+---
+
+### 16.9 Security Checklist (Pre-Deploy)
+
+Before going live, verify every item:
+
+- [ ] API Gateway throttling configured (50 req/sec default, 10 req/sec on POST /shorten)
+- [ ] SSRF protection implemented in ShortenService (scheme check, private IP block, length limit)
+- [ ] CORS configured with explicit domain, not wildcard
+- [ ] CloudFront set to redirect HTTP → HTTPS
+- [ ] ACM certificate provisioned and attached
+- [ ] Each Lambda has its own IAM role with minimum required permissions only
+- [ ] No hardcoded credentials anywhere in codebase
+- [ ] GitHub Actions secrets configured for all AWS credentials
+- [ ] `.env` confirmed in `.gitignore` and never committed
+- [ ] AWS Budget alert set at $10/month
+- [ ] ElastiCache security group allows inbound 6379 from λ redirect only
+- [ ] DynamoDB resource policy restricts access to Lambda roles only
+
