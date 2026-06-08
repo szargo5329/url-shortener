@@ -543,6 +543,8 @@ Each Lambda function gets its own IAM execution role with the **minimum permissi
 **DynamoDB resource policy:**
 Restrict table access so only the three Lambda execution roles can interact with it. No other AWS principal should have access.
 
+> ⚠️  **TODO (pre-production):** During initial development, the IAM user (`stephen-dev-local`) and CI/CD user use AWS managed `FullAccess` policies per service for convenience. Before considering this application production-ready, replace all managed `FullAccess` policies with custom least-privilege policies containing only the exact actions each user/role needs. Track this as a GitHub issue. Also see the pre-deploy checklist in Section 16.9.
+
 ---
 
 ### 16.6 Environment Variables & Secrets
@@ -622,4 +624,5 @@ Before going live, verify every item:
 - [ ] AWS Budget alert set at $10/month
 - [ ] ElastiCache security group allows inbound 6379 from λ redirect only
 - [ ] DynamoDB resource policy restricts access to Lambda roles only
+- [ ] Replace all managed FullAccess IAM policies with custom least-privilege policies (dev user + CI/CD user + Lambda roles)
 
