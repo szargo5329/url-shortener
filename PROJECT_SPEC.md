@@ -274,8 +274,12 @@ Claude Code should scaffold in this order:
 6. **UrlService** — business logic: cache-aside lookup, code generation, persistence
 7. **UrlController** — REST endpoints, validation, error handling
 8. **GlobalExceptionHandler** — `@ControllerAdvice` for consistent error responses
-9. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the API
-10. **CI/CD** — `.github/workflows/backend.yml` and `frontend.yml` as defined in Section 14
+9. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, and UrlController before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class.
+10. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
+11. **AWS infrastructure provisioning** — DynamoDB table, Lambda functions, API Gateway, ElastiCache + VPC private subnet, S3 bucket, CloudFront, Route 53. See Section 6.
+12. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
+13. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
+14. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated.
 
 ---
 
@@ -327,8 +331,14 @@ The following are **planned future iterations** — do NOT implement or scaffold
 
 ## 14. CI/CD Pipeline
 
-### Why from the start
-CI/CD should be set up at project initialization, not bolted on later. The cost of adding it early is low (one GitHub Actions file), and it immediately gives you automated safety nets — every push gets built and tested before it can break anything. Retrofitting it later means fixing all the environment config, secrets wiring, and build assumptions that accumulated while you were working without it.
+### When to set it up
+CI/CD is set up **after all backend classes and unit tests are written, but before AWS infrastructure is provisioned**. This is the optimal point because:
+
+- The pipeline needs something real to build and test — setting it up before any code exists is premature
+- Tests must exist before CI/CD is meaningful — a pipeline with no tests only checks compilation
+- Infrastructure must not exist yet when CI/CD is first created — the build+test workflow goes in first, then the deploy step is added once infrastructure is provisioned in step 11
+
+This means every infrastructure resource gets a fully automated, tested deployment pipeline from the moment it goes live. No manual deployments ever.
 
 ### Recommended: GitHub Actions
 
