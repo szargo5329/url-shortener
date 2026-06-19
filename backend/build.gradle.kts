@@ -33,6 +33,9 @@ dependencies {
     implementation("software.amazon.awssdk:dynamodb")
     implementation("software.amazon.awssdk:dynamodb-enhanced")
 
+    // SQS (AWS SDK v2) — click-event analytics pipeline
+    implementation("software.amazon.awssdk:sqs")
+
     // Redis (ElastiCache) cache layer
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("io.lettuce:lettuce-core")
