@@ -7,9 +7,12 @@
 
 A production-quality URL shortener built on AWS serverless infrastructure. Designed as a backend engineering portfolio piece with interview-scale system design. The application is fully functional and deployed — not a toy.
 
-**Domain setup (placeholder — replace with your actual domains):**
-- Frontend: `www.myapp.com`
-- Short links: `myapp.io/{code}`
+**Domain setup (placeholder — replace with your actual domain name when chosen):**
+- Single `.io` domain strategy — one domain, two purposes:
+  - `www.myapp.io` — the frontend where users create short links
+  - `myapp.io/{code}` — the short link redirect path
+- Both routes handled by Route 53, split to CloudFront (frontend) and API Gateway (short links)
+- Set actual domain via environment variables at deploy time — no hardcoded domain in code
 
 **Scale:** Small personal project (~10 users) but architected and implemented as if it could scale to millions.
 
@@ -137,7 +140,7 @@ See Section 6 for full architecture details.
 
 **Loading the frontend:**
 ```
-User → Route 53 (www.myapp.com) → CloudFront → S3
+User → Route 53 (www.myapp.io) → CloudFront → S3
 ```
 
 **Shortening a URL:**
@@ -245,7 +248,7 @@ BASE_SHORT_URL=https://myapp.io
 
 ### Frontend (.env)
 ```
-VITE_API_BASE_URL=https://api.myapp.com
+VITE_API_BASE_URL=https://api.myapp.io
 ```
 
 ---
@@ -506,7 +509,7 @@ CORS (Cross-Origin Resource Sharing) controls which domains are allowed to call 
 
 **Configure on API Gateway:**
 ```
-Access-Control-Allow-Origin:  https://www.myapp.io   ← your frontend domain only, NOT *
+Access-Control-Allow-Origin:  https://www.myapp.io   ← frontend subdomain only, NOT *
 Access-Control-Allow-Methods: GET, POST, OPTIONS
 Access-Control-Allow-Headers: Content-Type
 Access-Control-Max-Age:       86400
