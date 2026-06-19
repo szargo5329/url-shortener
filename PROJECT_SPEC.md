@@ -274,12 +274,13 @@ Claude Code should scaffold in this order:
 6. **UrlService** — business logic: cache-aside lookup, code generation, persistence
 7. **UrlController** — REST endpoints, validation, error handling
 8. **GlobalExceptionHandler** — `@ControllerAdvice` for consistent error responses
-9. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, and UrlController before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class.
-10. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
-11. **AWS infrastructure provisioning** — DynamoDB table, Lambda functions, API Gateway, ElastiCache + VPC private subnet, S3 bucket, CloudFront, Route 53. See Section 6.
-12. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
-13. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
-14. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated.
+9. **SQS analytics pipeline** — implement async click tracking. See Section 6 and new Section 17 for full details. Files: `SqsConfig.java`, `AnalyticsService.java`, `AnalyticsEventConsumer.java`. Update `UrlService.redirect()` to fire-and-forget to SQS. Add `click-events` DynamoDB table schema. Add SQS dependency to `build.gradle.kts`.
+10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class.
+11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
+12. **AWS infrastructure provisioning** — DynamoDB tables (url-mappings + click-events), Lambda functions (shorten, redirect, analytics), API Gateway, ElastiCache + VPC private subnet, SQS queue, S3 bucket, CloudFront, Route 53. See Section 6.
+13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
+14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
+15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table.
 
 ---
 
@@ -323,7 +324,7 @@ The following are **planned future iterations** — do NOT implement or scaffold
 - `GET /links` (list all links)
 - `DELETE /links/{code}`
 - `PATCH /links/{code}`
-- SQS analytics pipeline (SQS and Lambda: analytics exist in architecture but are wired up in a future iteration)
+- SQS analytics pipeline — moved to MVP scope, implemented in Step 9. See Section 17.
 - Terraform / CDK infrastructure as code
 
 
@@ -635,4 +636,151 @@ Before going live, verify every item:
 - [ ] ElastiCache security group allows inbound 6379 from λ redirect only
 - [ ] DynamoDB resource policy restricts access to Lambda roles only
 - [ ] Replace all managed FullAccess IAM policies with custom least-privilege policies (dev user + CI/CD user + Lambda roles)
+
+
+---
+
+## 17. SQS Analytics Pipeline
+
+> Added to MVP scope — implement after Step 8 (GlobalExceptionHandler) and before unit tests.
+
+---
+
+### 17.1 Overview
+
+When a short link is clicked, the redirect Lambda fires a click event to SQS asynchronously (fire-and-forget). A separate analytics Lambda consumes the queue and writes the click record to a dedicated DynamoDB table. The redirect response is never delayed by this — the user gets their 302 immediately.
+
+```
+User clicks link
+    → λ redirect → looks up URL → returns 302 (user is gone)
+                 → drops message on SQS (async, non-blocking)
+                         → λ analytics picks it up
+                                 → writes to click-events table
+```
+
+---
+
+### 17.2 New Files
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `SqsConfig.java` | `config/` | Builds `SqsClient` bean via AWS SDK v2 |
+| `AnalyticsService.java` | `service/` | Publishes click event JSON to SQS |
+| `AnalyticsEventConsumer.java` | `service/` | Consumes SQS messages, writes to DynamoDB |
+
+---
+
+### 17.3 Existing Files to Update
+
+**`build.gradle.kts`** — add SQS dependency:
+```kotlin
+implementation("software.amazon.awssdk:sqs")
+```
+
+**`application.yml`** — add SQS queue URL:
+```yaml
+app:
+  sqs:
+    queue-url: ${SQS_QUEUE_URL}
+```
+
+**`UrlService.java`** — add `AnalyticsService` injection and fire-and-forget call in `redirect()`:
+```java
+// After getting longUrl, before returning — non-blocking
+analyticsService.publishClickEvent(shortCode);
+return longUrl;
+```
+
+---
+
+### 17.4 Click Events DynamoDB Table
+
+**Table name:** `click-events`
+
+**Primary key:** Composite key
+- Partition key: `short_code` (String)
+- Sort key: `clicked_at` (String — ISO-8601 timestamp)
+
+**Attributes:**
+```
+short_code   (String) — which link was clicked, partition key
+clicked_at   (String) — ISO-8601 timestamp, sort key
+```
+
+Composite key allows querying all clicks for a specific short code ordered by time — useful for the V2 analytics dashboard.
+
+**Billing mode:** On-demand (PAY_PER_REQUEST)
+
+---
+
+### 17.5 Click Event Message Format
+
+Message published to SQS as JSON:
+```json
+{
+  "short_code": "x7k2p",
+  "clicked_at": "2026-06-06T12:00:00Z"
+}
+```
+
+Keep it minimal for MVP — just enough to record that a click happened and when.
+
+---
+
+### 17.6 AnalyticsService
+
+Responsibilities:
+- Accept a `shortCode` string
+- Build the click event JSON payload
+- Publish to SQS queue URL from config
+- Fire-and-forget — do NOT throw exceptions back to the caller. If SQS publish fails, log the error and swallow it. A failed analytics event must never cause a redirect to fail.
+
+```java
+public void publishClickEvent(String shortCode) {
+    try {
+        // build JSON payload
+        // sqsClient.sendMessage(...)
+    } catch (Exception e) {
+        log.error("Failed to publish click event for {}: {}", shortCode, e.getMessage());
+        // intentionally swallow — analytics failure must not break redirect
+    }
+}
+```
+
+---
+
+### 17.7 AnalyticsEventConsumer
+
+Responsibilities:
+- Receive SQS message (triggered by Lambda event source mapping in AWS)
+- Parse JSON payload
+- Build `ClickEvent` object
+- Write to `click-events` DynamoDB table
+
+This class is the analytics Lambda's entry point. In production it gets invoked by AWS Lambda's SQS trigger, not by Spring's normal request handling.
+
+---
+
+### 17.8 IAM Updates
+
+Add to λ analytics IAM role (Section 16.5):
+```
+sqs:ReceiveMessage
+sqs:DeleteMessage
+sqs:GetQueueAttributes
+dynamodb:PutItem  (on click-events table only)
+```
+
+Add to λ redirect IAM role:
+```
+sqs:SendMessage  (on the analytics queue only)
+```
+
+---
+
+### 17.9 Key Design Decision — Fire and Forget
+
+`UrlService.redirect()` calls `analyticsService.publishClickEvent()` but does NOT await a result or handle exceptions from it. If SQS is down or the publish fails, the user still gets their redirect. Analytics is a non-critical background concern — it must never degrade the core redirect experience.
+
+This is enforced by the try/catch in `AnalyticsService.publishClickEvent()` that swallows exceptions after logging them.
 
