@@ -39,16 +39,19 @@ public class UrlService {
     private final ShortCodeGenerator shortCodeGenerator;
     private final DynamoDbRepository dynamoDbRepository;
     private final CacheRepository cacheRepository;
+    private final AnalyticsService analyticsService;
     private final String baseShortUrl;
 
     public UrlService(
             ShortCodeGenerator shortCodeGenerator,
             DynamoDbRepository dynamoDbRepository,
             CacheRepository cacheRepository,
+            AnalyticsService analyticsService,
             @Value("${app.short-url.base}") String baseShortUrl) {
         this.shortCodeGenerator = shortCodeGenerator;
         this.dynamoDbRepository = dynamoDbRepository;
         this.cacheRepository = cacheRepository;
+        this.analyticsService = analyticsService;
         this.baseShortUrl = baseShortUrl;
     }
 
@@ -83,15 +86,19 @@ public class UrlService {
         String code = Objects.requireNonNull(shortCode, "shortCode must not be null");
 
         Optional<String> cached = cacheRepository.get(code);
+        final String longUrl;
         if (cached.isPresent()) {
-            return cached.get();
+            longUrl = cached.get();
+        } else {
+            UrlMapping mapping = dynamoDbRepository.getByShortCode(code)
+                    .orElseThrow(() -> new NotFoundException("Short code not found"));
+            longUrl = mapping.getLongUrl();
+            cacheRepository.put(code, longUrl);
         }
 
-        UrlMapping mapping = dynamoDbRepository.getByShortCode(code)
-                .orElseThrow(() -> new NotFoundException("Short code not found"));
-
-        String longUrl = mapping.getLongUrl();
-        cacheRepository.put(code, longUrl);
+        // Fire-and-forget click event — AnalyticsService swallows its own
+        // failures, so a publish error never breaks the redirect (Section 17.9).
+        analyticsService.publishClickEvent(code);
         return longUrl;
     }
 
