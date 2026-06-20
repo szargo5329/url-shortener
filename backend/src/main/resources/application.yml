@@ -13,6 +13,7 @@ app:
     region: ${AWS_REGION:us-east-1}
   dynamodb:
     table-name: ${DYNAMODB_TABLE_NAME:url-mappings}
+    click-events-table-name: ${DYNAMODB_CLICK_EVENTS_TABLE_NAME}
   short-url:
     base: ${BASE_SHORT_URL:https://myapp.io}
   cors:

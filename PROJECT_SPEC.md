@@ -323,6 +323,15 @@ Claude Code should scaffold in this order:
 
 ## 11. Frontend Design Directive (for Claude Code)
 
+**Reference mockup:**
+
+![URL shortener lo-fi cyberpunk mockup](assets/url-shortener-mockup.png)
+
+> The file [`assets/url_shortener_cyberpunk_mockup.html`](assets/url_shortener_cyberpunk_mockup.html)
+> contains the full interactive HTML mockup. Use it as the **exact design reference** 
+> when building the frontend. The full interactive HTML design reference to be used as the exact visual target
+> when scaffolding the frontend — extract colors, fonts, layout, and component structure directly from it.
+
 When generating the frontend, commit to a **lo-fi cyberpunk** aesthetic:
 - Dark background (`#0d0d0f` or similar near-black)
 - Neon accent color (green `#39ff14` or cyan `#00f5ff` — pick one and commit)
