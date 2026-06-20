@@ -84,6 +84,7 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
   - `software.amazon.awssdk:dynamodb` (AWS SDK v2)
   - `software.amazon.awssdk:dynamodb-enhanced`
   - `spring-data-redis` + `lettuce-core` (for ElastiCache/Redis)
+  - `software.amazon.awssdk:sqs` (AWS SDK v2 SQS — analytics pipeline)
   - `aws-serverless-java-container-springboot3` (Lambda adapter)
 
 ### Frontend
@@ -127,8 +128,8 @@ See Section 6 for full architecture details.
 | Lambda: redirect | Handles GET /{code}, VPC-attached | **Yes** |
 | DynamoDB | Persistent URL mapping storage | No |
 | ElastiCache (Redis) | In-memory cache for hot short codes | **Yes** |
-| SQS | Click event queue (future analytics) | No |
-| Lambda: analytics | Consumes SQS events (future) | No |
+| SQS | Click event queue for async analytics | No |
+| Lambda: analytics | Consumes SQS events, writes click data | No |
 
 ### VPC Notes
 - **ElastiCache requires a VPC** (private subnet). This is the only reason a VPC exists in this architecture.
@@ -153,7 +154,7 @@ User (browser) → API Gateway → Lambda: shorten → DynamoDB
 User → Route 53 (myapp.io/{code}) → API Gateway → Lambda: redirect
   → ElastiCache (cache hit → 302 redirect immediately)
   → DynamoDB (cache miss → 302 redirect → write to ElastiCache)
-  → SQS (async, fire-and-forget for future analytics)
+  → SQS (async, fire-and-forget → λ analytics → click-events DynamoDB table)
 ```
 
 ### Caching Strategy
@@ -183,6 +184,26 @@ expires_at  (String)  — ISO 8601 timestamp, nullable (null = no expiry)
 
 ---
 
+### DynamoDB Table Design — click-events
+
+**Table name:** `click-events`
+
+**Primary key:** Composite key
+- Partition key: `short_code` (String)
+- Sort key: `clicked_at` (String — ISO-8601 timestamp)
+
+**Attributes:**
+```
+short_code   (String) — which link was clicked, partition key
+clicked_at   (String) — ISO-8601 timestamp, sort key
+```
+
+**Access pattern:** Query all clicks for a specific short code ordered by time (useful for V2 analytics dashboard).
+
+**Billing mode:** On-demand (PAY_PER_REQUEST)
+
+---
+
 ## 7. Project Structure
 
 ```
@@ -193,22 +214,30 @@ url-shortener/
 │   │   │   ├── java/com/urlshortener/
 │   │   │   │   ├── UrlShortenerApplication.java
 │   │   │   │   ├── controller/
-│   │   │   │   │   └── UrlController.java        # REST endpoints
+│   │   │   │   │   └── UrlController.java              # REST endpoints
 │   │   │   │   ├── service/
-│   │   │   │   │   └── UrlService.java           # Business logic
+│   │   │   │   │   ├── UrlService.java                 # Core business logic
+│   │   │   │   │   ├── AnalyticsService.java           # SQS click event publisher
+│   │   │   │   │   └── AnalyticsEventConsumer.java     # SQS consumer, writes click data
 │   │   │   │   ├── repository/
-│   │   │   │   │   ├── DynamoDbRepository.java   # DynamoDB access
-│   │   │   │   │   └── CacheRepository.java      # Redis access
+│   │   │   │   │   ├── DynamoDbRepository.java         # DynamoDB access (url-mappings)
+│   │   │   │   │   └── CacheRepository.java            # Redis/ElastiCache access
 │   │   │   │   ├── model/
-│   │   │   │   │   ├── UrlMapping.java           # DynamoDB entity
-│   │   │   │   │   └── ClickEvent.java           # DynamoDB entity (click-events)
+│   │   │   │   │   ├── UrlMapping.java                 # DynamoDB entity (url-mappings table)
+│   │   │   │   │   └── ClickEvent.java                 # DynamoDB entity (click-events table)
 │   │   │   │   ├── dto/
-│   │   │   │   │   ├── ShortenRequest.java       # Request DTO
-│   │   │   │   │   └── ShortenResponse.java      # Response DTO
+│   │   │   │   │   ├── ShortenRequest.java             # POST /shorten request body
+│   │   │   │   │   └── ShortenResponse.java            # POST /shorten response body
+│   │   │   │   ├── config/
+│   │   │   │   │   ├── DynamoDbConfig.java             # DynamoDB client bean
+│   │   │   │   │   ├── RedisConfig.java                # Redis/ElastiCache client bean
+│   │   │   │   │   └── SqsConfig.java                  # SQS client bean
 │   │   │   │   ├── util/
-│   │   │   │   │   └── ShortCodeGenerator.java   # Base62 code gen
+│   │   │   │   │   └── ShortCodeGenerator.java         # Base62 code gen
 │   │   │   │   └── exception/
-│   │   │   │       └── GlobalExceptionHandler.java
+│   │   │   │       ├── GlobalExceptionHandler.java     # Centralized error mapping
+│   │   │   │       ├── InvalidUrlException.java        # 400 Bad Request
+│   │   │   │       └── NotFoundException.java          # 404 Not Found
 │   │   │   └── resources/
 │   │   │       └── application.yml
 │   │   └── test/
@@ -243,9 +272,12 @@ url-shortener/
 ```
 AWS_REGION=us-east-1
 DYNAMODB_TABLE_NAME=url-mappings
+DYNAMODB_CLICK_EVENTS_TABLE_NAME=click-events
 REDIS_HOST=<elasticache-endpoint>
 REDIS_PORT=6379
 BASE_SHORT_URL=https://myapp.io
+SQS_QUEUE_URL=<sqs-queue-url>
+FRONTEND_ORIGIN=https://www.myapp.io
 ```
 
 ### Frontend (.env)
@@ -272,7 +304,7 @@ VITE_API_BASE_URL=https://api.myapp.io
 Claude Code should scaffold in this order:
 
 1. **Backend project skeleton** — Spring Boot 3 + Gradle, all dependencies in `build.gradle.kts`, `application.yml` with placeholder config, package structure as defined in Section 7
-2. **Data models** — `UrlMapping` (entity in `model/`), `ShortenRequest` / `ShortenResponse` (DTOs in `dto/`)
+2. **Data models** — `UrlMapping`, `ShortenRequest`, `ShortenResponse`
 3. **ShortCodeGenerator utility** — Base62, 7 characters, collision-safe
 4. **DynamoDB repository** — CRUD using AWS SDK v2 enhanced client
 5. **Redis cache repository** — get/set with TTL using Spring Data Redis
