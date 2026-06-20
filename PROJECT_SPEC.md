@@ -201,6 +201,8 @@ url-shortener/
 │   │   │   │   │   └── CacheRepository.java      # Redis access
 │   │   │   │   ├── model/
 │   │   │   │   │   ├── UrlMapping.java           # DynamoDB entity
+│   │   │   │   │   └── ClickEvent.java           # DynamoDB entity (click-events)
+│   │   │   │   ├── dto/
 │   │   │   │   │   ├── ShortenRequest.java       # Request DTO
 │   │   │   │   │   └── ShortenResponse.java      # Response DTO
 │   │   │   │   ├── util/
@@ -270,7 +272,7 @@ VITE_API_BASE_URL=https://api.myapp.io
 Claude Code should scaffold in this order:
 
 1. **Backend project skeleton** — Spring Boot 3 + Gradle, all dependencies in `build.gradle.kts`, `application.yml` with placeholder config, package structure as defined in Section 7
-2. **Data models** — `UrlMapping`, `ShortenRequest`, `ShortenResponse`
+2. **Data models** — `UrlMapping` (entity in `model/`), `ShortenRequest` / `ShortenResponse` (DTOs in `dto/`)
 3. **ShortCodeGenerator utility** — Base62, 7 characters, collision-safe
 4. **DynamoDB repository** — CRUD using AWS SDK v2 enhanced client
 5. **Redis cache repository** — get/set with TTL using Spring Data Redis

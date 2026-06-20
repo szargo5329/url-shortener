@@ -1,7 +1,7 @@
 package com.urlshortener.controller;
 
-import com.urlshortener.model.ShortenRequest;
-import com.urlshortener.model.ShortenResponse;
+import com.urlshortener.dto.ShortenRequest;
+import com.urlshortener.dto.ShortenResponse;
 import com.urlshortener.service.UrlService;
 import jakarta.validation.Valid;
 import java.net.URI;

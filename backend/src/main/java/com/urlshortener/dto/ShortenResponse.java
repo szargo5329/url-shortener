@@ -1,7 +1,8 @@
-package com.urlshortener.model;
+package com.urlshortener.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.urlshortener.model.UrlMapping;
 
 /**
  * Response body for {@code POST /shorten} (HTTP 201).

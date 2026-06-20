@@ -1,8 +1,8 @@
 package com.urlshortener.service;
 
+import com.urlshortener.dto.ShortenResponse;
 import com.urlshortener.exception.InvalidUrlException;
 import com.urlshortener.exception.NotFoundException;
-import com.urlshortener.model.ShortenResponse;
 import com.urlshortener.model.UrlMapping;
 import com.urlshortener.repository.CacheRepository;
 import com.urlshortener.repository.DynamoDbRepository;
