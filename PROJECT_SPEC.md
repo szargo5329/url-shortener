@@ -830,3 +830,159 @@ sqs:SendMessage  (on the analytics queue only)
 
 This is enforced by the try/catch in `AnalyticsService.publishClickEvent()` that swallows exceptions after logging them.
 
+---
+
+## 18. Architecture Concepts & Learning Notes
+
+> This section documents the backend engineering concepts learned while building this project. It is not a reference for Claude Code — it is a personal knowledge base.
+
+---
+
+### 18.1 DTOs (Data Transfer Objects)
+
+**What they are:** Plain Java classes (or records) that represent data moving in and out of the application via HTTP. They define the shape of JSON that the API accepts and returns.
+
+**Why they exist:**
+- **Validation** — annotations like `@NotBlank` and `@Size` on DTO fields let Spring automatically reject invalid requests before they reach the service layer
+- **Separation of concerns** — your internal domain objects (entities) should never be exposed directly to the outside world. A `UrlMapping` entity has fields like `shortCode`, `createdAt`, `expiresAt` that belong to your database schema. A `ShortenResponse` DTO exposes only what the API caller needs to see.
+- **Control over shape** — the JSON your API accepts and returns doesn't have to match your internal data model
+
+**In this project:**
+- `ShortenRequest` — represents the incoming `POST /shorten` JSON body (`long_url`)
+- `ShortenResponse` — represents the outgoing `POST /shorten` JSON response (`short_code`, `short_url`, `long_url`, `created_at`, `expires_at`)
+
+**The flow:**
+```
+Incoming JSON → ShortenRequest DTO → Service layer → UrlMapping entity → DynamoDB
+DynamoDB → UrlMapping entity → Service layer → ShortenResponse DTO → Outgoing JSON
+```
+The entity never leaves the service layer. The DTO never goes near the database.
+
+**Package:** `com.urlshortener.dto`
+
+---
+
+### 18.2 Config Classes
+
+**What they are:** Spring `@Configuration` classes whose sole job is to build and expose infrastructure client objects (beans) that the rest of the application uses.
+
+**Why they exist:** Your repository and service classes need clients to talk to AWS services (DynamoDB, SQS) and Redis. Rather than each class creating its own client, the config class creates one shared instance that gets injected wherever it's needed. This is the **dependency injection** principle — components receive their dependencies rather than creating them.
+
+**In this project:**
+- `DynamoDbConfig` — builds `DynamoDbClient` and `DynamoDbEnhancedClient` beans that connect to AWS DynamoDB using the region from config and `DefaultCredentialsProvider` (picks up Lambda execution role in production, local `aws configure` credentials in development)
+- `RedisConfig` — builds `LettuceConnectionFactory` and `RedisTemplate<String, String>` beans that connect to ElastiCache/Redis
+- `SqsConfig` — builds `SqsClient` bean that connects to AWS SQS
+
+**Key pattern:** All three config classes follow the same pattern — region/host from environment variables, `DefaultCredentialsProvider` for credentials, never hardcoded values.
+
+**Package:** `com.urlshortener.config`
+
+---
+
+### 18.3 Model Classes (Entities)
+
+**What they are:** Java classes that directly represent rows/items in a DynamoDB table. Each field maps to a DynamoDB attribute. The DynamoDB enhanced client reads the annotations on these classes to automatically serialize/deserialize between Java objects and DynamoDB items.
+
+**Why they exist:** Rather than manually building DynamoDB attribute maps every time you read or write data, the enhanced client uses these annotated classes to do the mapping automatically.
+
+**Key annotations:**
+- `@DynamoDbBean` — marks the class as a DynamoDB entity
+- `@DynamoDbPartitionKey` — marks the getter for the partition key attribute
+- `@DynamoDbSortKey` — marks the getter for the sort key attribute (composite keys only)
+- `@DynamoDbAttribute("field_name")` — maps the Java field to the DynamoDB attribute name
+
+**In this project:**
+- `UrlMapping` — maps to the `url-mappings` table. Fields: `short_code` (partition key), `long_url`, `created_at`, `expires_at`
+- `ClickEvent` — maps to the `click-events` table. Fields: `short_code` (partition key), `clicked_at` (sort key). Composite key allows querying all clicks for a short code ordered by time.
+
+**Why mutable beans (not records):** The DynamoDB enhanced client requires a public no-arg constructor and standard getters/setters to instantiate and populate objects via reflection.
+
+**Package:** `com.urlshortener.model`
+
+---
+
+### 18.4 Repository Classes
+
+**What they are:** Classes that implement the actual data access methods — the code that reads from and writes to your storage systems. They abstract the storage details so the service layer never needs to know which database or cache is being used.
+
+**Why they exist:** Keeps data access logic isolated in one place. If you ever swap DynamoDB for a different database, you only change the repository — nothing else in the application changes.
+
+**In this project:**
+- `DynamoDbRepository` — wraps `DynamoDbEnhancedClient`, exposes three methods: `save()` (write a URL mapping), `getByShortCode()` (read by partition key), `exists()` (collision check for short code generation)
+- `CacheRepository` — wraps `RedisTemplate`, exposes three methods: `get()` (cache lookup), `put()` (cache write with 24h TTL), `evict()` (cache invalidation)
+
+**The pattern:** Repositories return `Optional<T>` for reads rather than `null`, forcing callers to explicitly handle the "not found" case.
+
+**Package:** `com.urlshortener.repository`
+
+---
+
+### 18.5 Service Layer
+
+**What it is:** The heart of the application — where all the unique business and application logic lives. The service layer orchestrates the other layers (repositories, utilities, external services) to implement what the application actually does.
+
+**Why it exists:** Keeps business logic completely separate from HTTP concerns (controller) and data access concerns (repository). The service layer doesn't know or care whether it's being called via HTTP, a message queue, or a unit test.
+
+**In this project:**
+- `UrlService` — core business logic: validates URLs (including SSRF protection), generates unique short codes, saves mappings to DynamoDB, implements cache-aside redirect lookup, fires analytics events
+- `AnalyticsService` — publishes click events to SQS. Fire-and-forget: swallows all exceptions so analytics failures never break redirects
+- `AnalyticsEventConsumer` — consumes SQS messages, parses click event JSON, writes `ClickEvent` records to DynamoDB. This is the analytics Lambda's entry point.
+
+**Package:** `com.urlshortener.service`
+
+---
+
+### 18.6 Exception Classes
+
+**Two distinct things that work together:**
+
+**Custom exception types** (`InvalidUrlException`, `NotFoundException`) — plain classes that extend `RuntimeException`. They exist to give meaningful names to error conditions rather than throwing generic exceptions. The service layer throws these when something goes wrong.
+
+**`GlobalExceptionHandler`** — a `@ControllerAdvice` class that intercepts every exception thrown anywhere in the application and translates it into a consistent HTTP response. Without it, Spring would return its own default error format which leaks internal details. With it, every error returns a clean `{ "error": "..." }` JSON response.
+
+**The separation:**
+```
+InvalidUrlException thrown in UrlService   ← domain concern (what went wrong)
+GlobalExceptionHandler catches it → 400    ← HTTP concern (how to communicate it)
+```
+
+The service layer never knows or cares about HTTP status codes. The handler never knows or cares about business rules.
+
+**In this project:**
+- `InvalidUrlException` → HTTP 400 Bad Request
+- `NotFoundException` → HTTP 404 Not Found
+- `MethodArgumentNotValidException` → HTTP 400 (Bean Validation failures)
+- `HttpMessageNotReadableException` → HTTP 400 (missing/malformed request body)
+- `Exception` (catch-all) → HTTP 500 Internal Server Error (logged, never leaked)
+
+**Package:** `com.urlshortener.exception`
+
+---
+
+### 18.7 Utility Classes
+
+**What they are:** Reusable helper classes that contain pure logic with no dependencies on HTTP, databases, or any specific layer. They solve one focused problem and can be used by any layer of the application.
+
+**Why they exist:** If a piece of logic doesn't belong to any specific layer — it's not HTTP handling, not data access, not business logic tied to a specific domain object — it goes in a utility class. This keeps it reusable and independently testable.
+
+**Not exclusive to the service layer** — utils can be used by any layer. In practice they're most commonly used by the service layer, but a controller could use a utility class for request parsing, a repository could use one for query building, etc.
+
+**In this project:**
+- `ShortCodeGenerator` — generates random 7-character Base62 short codes using `SecureRandom`. Exposes `generate()` for a single code and `generateUnique(Predicate<String> exists)` for collision-safe generation. Takes the existence check as a `Predicate` parameter so it has zero dependency on any storage layer — the caller decides how to check for collisions.
+
+**Package:** `com.urlshortener.util`
+
+---
+
+### 18.8 Key Design Patterns Used
+
+| Pattern | Where | What it does |
+|---------|-------|-------------|
+| Dependency Injection | Everywhere | Components receive dependencies via constructor rather than creating them |
+| Cache-aside (Lazy Loading) | `UrlService.redirect()` | Check cache first, fall back to DB on miss, populate cache on miss |
+| Fire-and-forget | `UrlService` → `AnalyticsService` | Publish analytics event without waiting for result or handling failure |
+| Separation of Concerns | All layers | Each class has one job and one reason to change |
+| Single Exit Point | `UrlService.redirect()` | One return statement ensures analytics always fires on every redirect |
+| DTO Pattern | `ShortenRequest/Response` | Separate API contract from internal data model |
+| Repository Pattern | `DynamoDbRepository`, `CacheRepository` | Abstract storage details behind a consistent interface |
+
