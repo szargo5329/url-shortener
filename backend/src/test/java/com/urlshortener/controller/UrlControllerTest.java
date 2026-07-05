@@ -35,6 +35,7 @@ class UrlControllerTest {
 
     @Test
     @DisplayName("POST /shorten returns 201 with the response body on success")
+    @SuppressWarnings("null") // MediaType.APPLICATION_JSON / nullValue() aren't @NonNull-annotated (false positive)
     void shortenReturnsCreated() throws Exception {
         ShortenResponse response = new ShortenResponse(
                 "abc1234",
@@ -61,6 +62,7 @@ class UrlControllerTest {
 
     @Test
     @DisplayName("POST /shorten returns 400 when long_url is blank")
+    @SuppressWarnings("null") // MediaType.APPLICATION_JSON isn't @NonNull-annotated (false positive)
     void shortenReturnsBadRequestForBlankUrl() throws Exception {
         String body = """
                 {"long_url":"   "}
