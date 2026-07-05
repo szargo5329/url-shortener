@@ -58,6 +58,7 @@ class CacheRepositoryTest {
 
     @Test
     @DisplayName("put() stores the value with a 24-hour TTL")
+    @SuppressWarnings("null") // eq()/ArgumentCaptor.capture() aren't @NonNull-annotated (false positive)
     void putStoresValueWithTtl() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
