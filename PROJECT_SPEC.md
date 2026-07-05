@@ -101,6 +101,8 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
 - Use: CSS variables for theming, micro-animations, cohesive dark palette with sharp accent color
 
 ### Infrastructure (AWS)
+- **IaC tool:** Terraform — manages all core application infrastructure (see Section 19)
+- **Manually provisioned (console):** domain registration, ACM certificate, AWS Budget alert — see Section 19.2 for full rationale
 See Section 6 for full architecture details.
 
 ---
@@ -314,7 +316,10 @@ Claude Code should scaffold in this order:
 9. **SQS analytics pipeline** — implement async click tracking. See Section 6 and new Section 17 for full details. Files: `SqsConfig.java`, `AnalyticsService.java`, `AnalyticsEventConsumer.java`. Update `UrlService.redirect()` to fire-and-forget to SQS. Add `click-events` DynamoDB table schema. Add SQS dependency to `build.gradle.kts`.
 10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class.
 11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
-12. **AWS infrastructure provisioning** — DynamoDB tables (url-mappings + click-events), Lambda functions (shorten, redirect, analytics), API Gateway, ElastiCache + VPC private subnet, SQS queue, S3 bucket, CloudFront, Route 53. See Section 6.
+12. **AWS infrastructure provisioning** — split into three parts. See Section 19 for full details.
+    - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform.
+    - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles.
+    - 12c. **Console-managed (manual, one-off)** — Route 53 domain registration, ACM certificate request + validation, AWS Budget alert.
 13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
 14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
 15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table.
@@ -371,7 +376,7 @@ The following are **planned future iterations** — do NOT implement or scaffold
 - `DELETE /links/{code}`
 - `PATCH /links/{code}`
 - SQS analytics pipeline — moved to MVP scope, implemented in Step 9. See Section 17.
-- Terraform / CDK infrastructure as code
+- ~~Terraform / CDK infrastructure as code~~ — MOVED INTO SCOPE. See Section 19.
 
 
 ---
@@ -985,4 +990,102 @@ The service layer never knows or cares about HTTP status codes. The handler neve
 | Single Exit Point | `UrlService.redirect()` | One return statement ensures analytics always fires on every redirect |
 | DTO Pattern | `ShortenRequest/Response` | Separate API contract from internal data model |
 | Repository Pattern | `DynamoDbRepository`, `CacheRepository` | Abstract storage details behind a consistent interface |
+
+
+---
+
+## 19. Infrastructure as Code (Terraform)
+
+> Added to MVP scope. Implemented at Step 12, after all backend code, unit tests, and the build+test-only CI/CD pipeline are complete.
+
+---
+
+### 19.1 Why Terraform
+
+Manually clicking through the AWS Console to create resources is fine for learning, but it does not scale, is not reproducible, and cannot be version controlled or code reviewed. Terraform lets the entire infrastructure be defined as code — checked into Git alongside the application, reviewable in pull requests, and reproducible from scratch on any AWS account.
+
+This is also a genuinely high-value skill for a backend/cloud portfolio — Infrastructure as Code is one of the most commonly requested skills in cloud and backend job postings.
+
+---
+
+### 19.2 Split: Terraform-managed vs Console-managed
+
+**Rationale for the split:** some AWS setup steps involve manual verification (domain ownership, DNS validation, email confirmation) that don't automate cleanly and are commonly left as one-time manual steps even in mature, fully Terraform-managed production environments.
+
+**Terraform-managed (all core application infrastructure):**
+| Resource | Notes |
+|----------|-------|
+| Lambda functions | shorten, redirect, analytics — all three |
+| API Gateway | Routes, throttling, CORS |
+| DynamoDB | Both tables: url-mappings, click-events |
+| VPC | Private subnets (us-east-1a, us-east-1b), security groups |
+| ElastiCache | Primary + replica node, Multi-AZ |
+| SQS | Click event queue |
+| S3 | Frontend static hosting bucket |
+| CloudFront | Distribution + WAF association |
+| IAM | Roles and least-privilege policies per Lambda |
+
+**Console-managed (manual, one-off):**
+| Task | Why manual |
+|------|-----------|
+| Route 53 domain registration | Requires ownership verification, one-time purchase |
+| ACM certificate request + DNS validation | Manual DNS validation step, awkward to automate cleanly |
+| AWS Budget alert | One-time account-level setting |
+| IAM user (`stephen-dev-local`) | Already done — personal dev credentials, not app infrastructure |
+
+---
+
+### 19.3 Console Orientation (Step 12a)
+
+**Before writing any Terraform**, spend 15-20 minutes in the AWS Console:
+1. Manually create a simple DynamoDB table (any name, any schema)
+2. Look through its settings — capacity mode, indexes, item structure
+3. Delete it
+
+Purpose: build a mental model of what a "resource" actually is before automating its creation. Terraform without ever having seen the console first often means copy-pasting HCL syntax without understanding what it does.
+
+---
+
+### 19.4 Terraform Project Structure
+
+```
+url-shortener/
+├── infrastructure/
+│   ├── main.tf              # Provider config, backend state config
+│   ├── variables.tf         # Input variables (region, table names, etc.)
+│   ├── outputs.tf           # Output values (API Gateway URL, CloudFront domain, etc.)
+│   ├── lambda.tf            # Lambda function resources
+│   ├── api_gateway.tf       # API Gateway resources
+│   ├── dynamodb.tf          # Both DynamoDB tables
+│   ├── vpc.tf               # VPC, subnets, security groups
+│   ├── elasticache.tf       # ElastiCache primary + replica
+│   ├── sqs.tf               # SQS queue
+│   ├── s3.tf                # S3 bucket for frontend
+│   ├── cloudfront.tf        # CloudFront distribution
+│   ├── iam.tf               # IAM roles and policies
+│   └── terraform.tfvars     # Actual variable values (gitignored if it contains secrets)
+```
+
+---
+
+### 19.5 State Management
+
+Terraform state should NOT be stored locally for anything beyond initial learning/testing. Once comfortable with basics, migrate to a remote backend:
+- **S3 backend** with **DynamoDB table for state locking** — the standard AWS-native approach
+- This prevents state file loss and allows safe concurrent access (relevant once CI/CD runs `terraform apply`)
+
+---
+
+### 19.6 CI/CD Integration — Decision Pending
+
+Whether the CI/CD pipeline (Section 14) automatically runs `terraform plan`/`terraform apply` on push, or whether Terraform is run manually from the local machine, is **not yet decided**. This decision should be made once Terraform basics are comfortable, after Step 12b is underway. Revisit this section at that point.
+
+---
+
+### 19.7 What NOT to do
+
+- Do not hardcode AWS credentials in any `.tf` file
+- Do not commit `.tfstate` files to Git (add to `.gitignore`)
+- Do not commit `terraform.tfvars` if it contains sensitive values
+- Do not run `terraform destroy` without understanding exactly what it will remove
 
