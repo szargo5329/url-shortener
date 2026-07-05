@@ -107,3 +107,13 @@ log/
 *.bak
 *.swp
 *.tmp
+# ─────────────────────────────────────────
+# TERRAFORM
+# ─────────────────────────────────────────
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfplan
+crash.log
