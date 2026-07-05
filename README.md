@@ -23,7 +23,7 @@ SHR.T shortens long URLs into compact, shareable links — but it's built the wa
 This project is being built and documented end-to-end, from system design through production deployment, as a hands-on deep dive into system design, cloud architecture, and infrastructure.
 
 <div align="center">
-  <img src="./assets/mockup.png" alt="SHR.T UI Mockup" width="700">
+  <img src="./assets/url-shortener-mockup.png" alt="SHR.T UI Mockup" width="700">
 </div>
 
 ---
@@ -31,7 +31,7 @@ This project is being built and documented end-to-end, from system design throug
 ## Architecture
 
 <div align="center">
-  <img src="./assets/architecture-diagram.png" alt="AWS Architecture Diagram" width="900">
+  <img src="./assets/shrt-architecture-diagram.png" alt="AWS Architecture Diagram" width="900">
 </div>
 
 **Highlights:**
