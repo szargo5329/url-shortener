@@ -22,8 +22,9 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
 
 1. Users can submit a long URL and receive a shortened URL in return.
 2. Users can visit a shortened URL and be redirected to the original destination.
+3. Shortened links automatically expire 7 days after creation (fixed default, not user-configurable in MVP).
 
-> Future iterations (do NOT implement in MVP): custom aliases, link expiration/TTLs, click analytics dashboard, user accounts/auth, link deletion, link listing.
+> Future iterations (do NOT implement in MVP): custom aliases, user-configurable expiration (up to 30 days max), click analytics dashboard, user accounts/auth, link deletion, link listing.
 
 ---
 
@@ -52,9 +53,10 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
   "short_url": "https://myapp.io/x7k2p",
   "long_url": "https://www.amazon.com/some/very/long/product/link",
   "created_at": "2026-06-06T12:00:00Z",
-  "expires_at": null
+  "expires_at": "2026-06-13T12:00:00Z"
 }
 ```
+> `expires_at` is now always populated — 7 days after `created_at` — per the fixed MVP expiration policy (Section 15).
 
 **Validation:**
 - Reject null/empty URLs
@@ -280,6 +282,7 @@ REDIS_PORT=6379
 BASE_SHORT_URL=https://myapp.io
 SQS_QUEUE_URL=<sqs-queue-url>
 FRONTEND_ORIGIN=https://www.myapp.io
+LINK_EXPIRATION_DAYS=7
 ```
 
 ### Frontend (.env)
@@ -314,7 +317,8 @@ Claude Code should scaffold in this order:
 7. **UrlController** — REST endpoints, validation, error handling
 8. **GlobalExceptionHandler** — `@ControllerAdvice` for consistent error responses
 9. **SQS analytics pipeline** — implement async click tracking. See Section 6 and new Section 17 for full details. Files: `SqsConfig.java`, `AnalyticsService.java`, `AnalyticsEventConsumer.java`. Update `UrlService.redirect()` to fire-and-forget to SQS. Add `click-events` DynamoDB table schema. Add SQS dependency to `build.gradle.kts`.
-10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class.
+10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class. **STATUS: COMPLETE.**
+10b. **Link expiration (fixed 7-day MVP default)** — added to scope after Step 10. See Section 15 for full details. Update `UrlService.shorten()` to set a real `expiresAt`, update `UrlService.redirect()` to check expiry, add `app.link.expiration-days` config. Update the existing `UrlServiceTest` test that asserts null `expiresAt`, add a new test for the expired-link 404 case.
 11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
 12. **AWS infrastructure provisioning** — split into three parts. See Section 19 for full details.
     - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform.
@@ -370,7 +374,7 @@ When generating the frontend, commit to a **lo-fi cyberpunk** aesthetic:
 The following are **planned future iterations** — do NOT implement or scaffold:
 - User authentication / accounts
 - Custom aliases
-- Link expiration / TTLs (field exists in DB schema, logic not implemented)
+- User-configurable link expiration (up to 30 days max) — fixed 7-day default IS implemented in MVP, see Section 15
 - Click analytics dashboard
 - `GET /links` (list all links)
 - `DELETE /links/{code}`
@@ -442,46 +446,85 @@ CLOUDFRONT_DISTRIBUTION_ID
 
 ## 15. Link Expiration / TTL Implementation
 
-> This is a **V2 feature** — not in MVP. But the DB schema already has the `expires_at` field so it is ready to implement when you get here.
+> **MVP scope.** Every shortened link automatically expires **7 days after creation** — fixed default, not user-configurable. User-configurable expiration (up to 30 days max) is a documented V2 feature (see Section 13).
+
+### Why 7 days, and why fixed-not-configurable for MVP
+
+- Long enough that demo links, links shared in conversations, and portfolio/interview links won't die mid-use
+- Short enough to genuinely exercise the TTL mechanics end-to-end rather than never actually testing expiration
+- Standard URL shorteners default to permanent links — a fixed expiration is a deliberate scope decision here, not an oversight, and is documented as such
+- User-configurable expiration requires a new `POST /shorten` request field, new validation, and API contract changes — reasonable scope for V2, not MVP
+
+### Configuration
+
+The expiration duration is set via environment variable, never hardcoded:
+
+```
+LINK_EXPIRATION_DAYS=7
+```
+
+`application.yml`:
+```yaml
+app:
+  link:
+    expiration-days: ${LINK_EXPIRATION_DAYS:7}
+```
+
+Changing the MVP default later (or eventually replacing it with per-request user choice in V2) is a config change, not a code change.
 
 ### How it works across the stack
 
-**Redis TTL — built-in, no custom logic needed.**
-Redis natively supports per-key expiration via the `EXPIRE` or `SET ... EX` command. When you write a link to the cache, you pass a TTL in seconds and Redis automatically evicts it when the time is up. You do not write any expiration logic yourself for the cache layer — you just pass the duration:
+**Application logic sets the expiration at creation time.**
+In `UrlService.shorten()`, `expiresAt` is calculated and stored as an ISO-8601 timestamp 7 days from creation, rather than always being `null`:
 
 ```java
-// Spring Data Redis — set key with TTL
-redisTemplate.opsForValue().set(shortCode, longUrl, Duration.ofHours(24));
+Instant expiresAt = Instant.now().plus(linkExpirationDays, ChronoUnit.DAYS);
+UrlMapping mapping = new UrlMapping(shortCode, longUrl, createdAt, expiresAt.toString());
 ```
 
-When Redis evicts the key, the next lookup is a cache miss and falls through to DynamoDB as normal.
-
-**DynamoDB TTL — also built-in, also no custom logic needed.**
-DynamoDB has a native TTL feature. You designate one attribute as the TTL attribute (in your case `expires_at`), store a Unix epoch timestamp in it, and DynamoDB automatically deletes the item within ~48 hours of that timestamp passing. You enable this once at the table level — no scheduled jobs, no delete logic in your code.
-
-```
-expires_at: 1783000000   ← Unix epoch seconds, DynamoDB deletes this item automatically
-expires_at: null         ← no expiry, item lives forever
-```
-
-**Application logic — this is the part you do write.**
-When a redirect request comes in, after fetching the mapping (from cache or DB), check if it's expired:
+**Application logic checks expiration at redirect time.**
+In `UrlService.redirect()`, after fetching the mapping (from cache or DB), check if it's expired before returning the long URL:
 
 ```java
-if (mapping.getExpiresAt() != null && Instant.now().isAfter(mapping.getExpiresAt())) {
-    return 404; // treat expired link same as not found
+if (mapping.getExpiresAt() != null
+        && Instant.now().isAfter(Instant.parse(mapping.getExpiresAt()))) {
+    throw new NotFoundException("Short code not found"); // expired link = not found
 }
 ```
 
-This guard is needed because DynamoDB TTL deletion has up to a 48h delay — an item can still be returned by a query even after its TTL timestamp has passed. Your application needs to enforce expiry at the code level, not rely solely on DynamoDB having deleted it yet.
+An expired link returns the same 404 as a nonexistent one — the caller can't distinguish "never existed" from "existed but expired," which is intentional (no information leakage).
+
+**Redis TTL — built-in, no custom logic needed, already implemented.**
+The cache layer already uses a 24-hour TTL (Section 6, `CacheRepository`) — this is independent of link expiration and does not need to change. A cached entry may need to be re-validated against `expires_at` after a cache hit, since Redis doesn't know about the link's actual expiration, only its own 24h cache lifetime.
+
+> ⚠️ **Important implementation detail:** because Redis caches only the long URL string (not the full `UrlMapping` with its `expires_at` field), a cache hit currently has no way to check expiration. Either (a) also cache the `expires_at` value alongside the long URL, or (b) accept that a cache hit within the 7-day window always succeeds and expiration is only enforced on cache misses (DynamoDB reads). Option (b) is acceptable for MVP since Redis TTL is 24h — worst case, a link expires and is still servable from cache for up to 24h after its actual expiration. Document this as a known MVP limitation.
+
+**DynamoDB TTL — built-in, enable at the table level via Terraform (Step 12).**
+DynamoDB has a native TTL feature. Designate `expires_at` as the TTL attribute, store a **Unix epoch timestamp** in it (not the ISO-8601 string used elsewhere — this is a DynamoDB-specific requirement), and DynamoDB automatically deletes the item within ~48 hours of that timestamp passing. This is configured once at the table level in Terraform — no scheduled jobs, no delete logic in application code.
+
+> **Note:** this means `expires_at` needs to support being read as both an ISO-8601 string (for the application-level check above) and being usable as a Unix epoch number for DynamoDB's native TTL attribute. Confirm during implementation whether to store it as epoch seconds directly (simpler for DynamoDB TTL, requires conversion for display) or keep ISO-8601 and rely solely on the application-level check without enabling DynamoDB's native TTL attribute for MVP. Either is valid — decide during Step 12 when the table is actually provisioned.
+
+This guard exists because DynamoDB TTL deletion has up to a 48h delay — an item can still be returned by a query even after its TTL timestamp has passed. The application must enforce expiry at the code level regardless of whether native DynamoDB TTL is also enabled.
 
 ### Summary
 
 | Layer | Mechanism | Custom code? |
 |-------|-----------|--------------|
-| Redis | Native `EXPIRE` / `SET EX` | No — pass TTL duration on write |
-| DynamoDB | Native TTL attribute | No — enable at table level, store Unix timestamp |
-| Application | Check `expires_at` on every lookup | Yes — ~3 lines, return 404 if expired |
+| Application (create) | Set `expires_at` = now + 7 days | Yes — `UrlService.shorten()` |
+| Application (redirect) | Check `expires_at`, throw `NotFoundException` if past | Yes — `UrlService.redirect()`, ~3 lines |
+| Redis | 24h cache TTL (unrelated, already implemented) | No — already done, known limitation noted above |
+| DynamoDB | Native TTL attribute (optional for MVP, decide at Step 12) | No — enable at table level via Terraform if used |
+
+### What Changes in Already-Written Code
+
+This feature touches code that is already implemented, tested, and merged to `main`. The following need updates:
+
+- `UrlService.shorten()` — set real `expiresAt` instead of `null`
+- `UrlService.redirect()` — add expiry check before returning
+- `UrlServiceTest.shortenReturnsResponseForValidUrl()` — currently asserts `expiresAt` is null; update to assert it's ~7 days in the future
+- New test: `redirectThrowsWhenExpired()` — mapping with a past `expires_at` should throw `NotFoundException`
+- `application.yml` — add `app.link.expiration-days`
+- `PROJECT_SPEC.md` Sections 2, 3, 13 — already updated to reflect this
 
 
 ---
