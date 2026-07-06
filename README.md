@@ -103,8 +103,8 @@ Returns `302 Found` with a `Location` header pointing to the original URL. Uses 
 - [x] Backend: data models, repositories, services, controllers
 - [x] Backend: SQS async analytics pipeline
 - [x] Backend: SSRF protection, centralized error handling
-- [ ] Unit tests *(in progress)*
-- [ ] CI/CD pipeline (GitHub Actions)
+- [x] Unit tests — 6 test classes, ~37 tests, zero real AWS/Redis dependencies
+- [ ] CI/CD pipeline (GitHub Actions) *(in progress)*
 - [ ] Infrastructure as Code (Terraform)
 - [ ] AWS deployment
 - [ ] Frontend implementation
@@ -135,4 +135,3 @@ cd url-shortener/backend
 ## License
 
 MIT
-
