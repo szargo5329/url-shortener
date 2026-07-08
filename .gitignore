@@ -23,7 +23,7 @@ spring-shell.log
 # ─────────────────────────────────────────
 .gradle/
 gradle-app.setting
-!gradle/wrapper/gradle-wrapper.jar
+!/backend/gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/gradle/
 !**/src/test/**/gradle/
 
