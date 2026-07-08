@@ -1,0 +1,37 @@
+name: Backend CI
+
+# Build + test only. No deploy step yet — AWS infrastructure does not exist
+# until Step 12; the deploy stage (Section 14) is added then.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Fails the job (and thus the workflow) on any test failure.
+      - name: Build and run tests
+        run: ./gradlew clean test --no-daemon
