@@ -16,6 +16,8 @@ app:
     click-events-table-name: ${DYNAMODB_CLICK_EVENTS_TABLE_NAME}
   short-url:
     base: ${BASE_SHORT_URL:https://myapp.io}
+  link:
+    expiration-days: ${LINK_EXPIRATION_DAYS:7}
   cors:
     # Frontend origin allowed to call the API (Section 16.3) — explicit, never "*".
     allowed-origin: ${FRONTEND_ORIGIN:https://www.myapp.io}

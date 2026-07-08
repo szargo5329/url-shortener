@@ -15,6 +15,8 @@ import com.urlshortener.model.UrlMapping;
 import com.urlshortener.repository.CacheRepository;
 import com.urlshortener.repository.DynamoDbRepository;
 import com.urlshortener.util.ShortCodeGenerator;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +34,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class UrlServiceTest {
 
     private static final String BASE_URL = "https://myapp.io";
+    private static final long EXPIRATION_DAYS = 7;
 
     @Mock
     private ShortCodeGenerator shortCodeGenerator;
@@ -50,7 +53,8 @@ class UrlServiceTest {
     @BeforeEach
     void setUp() {
         service = new UrlService(
-                shortCodeGenerator, dynamoDbRepository, cacheRepository, analyticsService, BASE_URL);
+                shortCodeGenerator, dynamoDbRepository, cacheRepository, analyticsService,
+                BASE_URL, EXPIRATION_DAYS);
     }
 
     // ---------------------------------------------------------------------
@@ -70,13 +74,18 @@ class UrlServiceTest {
         assertThat(response.shortUrl()).isEqualTo(BASE_URL + "/abc1234");
         assertThat(response.longUrl()).isEqualTo(longUrl);
         assertThat(response.createdAt()).isNotNull();
-        assertThat(response.expiresAt()).isNull();
+        // expires_at should be roughly EXPIRATION_DAYS (7) days in the future.
+        assertThat(response.expiresAt()).isNotNull();
+        Instant actualExpiry = Instant.parse(response.expiresAt());
+        Instant expectedExpiry = Instant.now().plus(EXPIRATION_DAYS, ChronoUnit.DAYS);
+        assertThat(actualExpiry)
+                .isBetween(expectedExpiry.minusSeconds(60), expectedExpiry.plusSeconds(60));
 
         ArgumentCaptor<UrlMapping> saved = ArgumentCaptor.forClass(UrlMapping.class);
         verify(dynamoDbRepository).save(saved.capture());
         assertThat(saved.getValue().getShortCode()).isEqualTo("abc1234");
         assertThat(saved.getValue().getLongUrl()).isEqualTo(longUrl);
-        assertThat(saved.getValue().getExpiresAt()).isNull();
+        assertThat(saved.getValue().getExpiresAt()).isEqualTo(response.expiresAt());
         assertThat(saved.getValue().getCreatedAt()).isNotNull();
 
         // Shortening does not emit click events — only redirects do.
@@ -173,6 +182,23 @@ class UrlServiceTest {
         assertThatThrownBy(() -> service.redirect("missing"))
                 .isInstanceOf(NotFoundException.class);
 
+        verify(analyticsService, never()).publishClickEvent(any());
+    }
+
+    @Test
+    @DisplayName("redirect() throws NotFoundException when the mapping has expired")
+    void redirectThrowsWhenExpired() {
+        String pastExpiry = Instant.now().minus(1, ChronoUnit.DAYS).toString();
+        UrlMapping expired = new UrlMapping(
+                "abc1234", "https://example.com/page", "2026-01-01T00:00:00Z", pastExpiry);
+        when(cacheRepository.get("abc1234")).thenReturn(Optional.empty());
+        when(dynamoDbRepository.getByShortCode("abc1234")).thenReturn(Optional.of(expired));
+
+        assertThatThrownBy(() -> service.redirect("abc1234"))
+                .isInstanceOf(NotFoundException.class);
+
+        // Expired links must not be cached, and no click event should fire.
+        verify(cacheRepository, never()).put(any(), any());
         verify(analyticsService, never()).publishClickEvent(any());
     }
 }

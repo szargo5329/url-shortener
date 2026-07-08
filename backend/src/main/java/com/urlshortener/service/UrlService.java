@@ -12,6 +12,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -41,18 +42,21 @@ public class UrlService {
     private final CacheRepository cacheRepository;
     private final AnalyticsService analyticsService;
     private final String baseShortUrl;
+    private final long linkExpirationDays;
 
     public UrlService(
             ShortCodeGenerator shortCodeGenerator,
             DynamoDbRepository dynamoDbRepository,
             CacheRepository cacheRepository,
             AnalyticsService analyticsService,
-            @Value("${app.short-url.base}") String baseShortUrl) {
+            @Value("${app.short-url.base}") String baseShortUrl,
+            @Value("${app.link.expiration-days}") long linkExpirationDays) {
         this.shortCodeGenerator = shortCodeGenerator;
         this.dynamoDbRepository = dynamoDbRepository;
         this.cacheRepository = cacheRepository;
         this.analyticsService = analyticsService;
         this.baseShortUrl = baseShortUrl;
+        this.linkExpirationDays = linkExpirationDays;
     }
 
     /**
@@ -67,8 +71,10 @@ public class UrlService {
         validateUrl(longUrl);
 
         String shortCode = shortCodeGenerator.generateUnique(dynamoDbRepository::exists);
-        String createdAt = Instant.now().toString();
-        UrlMapping mapping = new UrlMapping(shortCode, longUrl, createdAt, null);
+        Instant now = Instant.now();
+        String createdAt = now.toString();
+        String expiresAt = now.plus(linkExpirationDays, ChronoUnit.DAYS).toString();
+        UrlMapping mapping = new UrlMapping(shortCode, longUrl, createdAt, expiresAt);
 
         dynamoDbRepository.save(mapping);
 
@@ -92,6 +98,13 @@ public class UrlService {
         } else {
             UrlMapping mapping = dynamoDbRepository.getByShortCode(code)
                     .orElseThrow(() -> new NotFoundException("Short code not found"));
+            // Enforce expiry at the application layer — DynamoDB TTL deletion can
+            // lag up to ~48h, so an expired item may still be returned (Section 15).
+            // Note: only reachable on a cache miss; cache hits store just the long
+            // URL, not the mapping, so they cannot check expiry (accepted MVP limit).
+            if (isExpired(mapping)) {
+                throw new NotFoundException("Short code not found");
+            }
             longUrl = mapping.getLongUrl();
             cacheRepository.put(code, longUrl);
         }
@@ -100,6 +113,15 @@ public class UrlService {
         // failures, so a publish error never breaks the redirect (Section 17.9).
         analyticsService.publishClickEvent(code);
         return longUrl;
+    }
+
+    /**
+     * Returns whether a mapping has an expiry timestamp that is now in the past.
+     * A {@code null} {@code expires_at} means the link never expires.
+     */
+    private boolean isExpired(UrlMapping mapping) {
+        String expiresAt = mapping.getExpiresAt();
+        return expiresAt != null && Instant.now().isAfter(Instant.parse(expiresAt));
     }
 
     /**
