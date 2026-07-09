@@ -1,11 +1,18 @@
 # Terraform output values for the url-shortener infrastructure.
 #
-# Empty placeholder for now — no resources exist yet (this step is just the
-# foundational files). As infrastructure is added in Step 12b, this file will
-# expose the values other tools and the app need, such as:
-#   - DynamoDB table names (url-mappings, click-events)
+# More outputs will be added as resources are created in Step 12b, such as:
 #   - API Gateway invoke URL
 #   - CloudFront distribution domain name
 #   - ElastiCache primary endpoint
 #   - SQS queue URL
 #   - S3 frontend bucket name
+
+output "url_mappings_table_name" {
+  description = "Name of the DynamoDB table storing short-code → URL mappings."
+  value       = aws_dynamodb_table.url_mappings.name
+}
+
+output "click_events_table_name" {
+  description = "Name of the DynamoDB table storing click events for analytics."
+  value       = aws_dynamodb_table.click_events.name
+}
