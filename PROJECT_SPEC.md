@@ -262,8 +262,10 @@ url-shortener/
 │   ├── tailwind.config.ts
 │   └── package.json
 │
-├── infrastructure/                   # AWS IaC (Terraform or SAM — TBD)
-│   └── (scaffold but do not implement in MVP scaffolding phase)
+├── infrastructure/                   # AWS IaC (Terraform) — see Section 19
+│   ├── main.tf                       # AWS provider config, remote state (commented, local for now)
+│   ├── variables.tf                  # aws_region, environment
+│   └── outputs.tf                    # Placeholder — table names, endpoint URLs added as resources are created
 │
 └── PROJECT_SPEC.md                   # This file
 ```
