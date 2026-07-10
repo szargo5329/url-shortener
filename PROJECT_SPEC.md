@@ -638,9 +638,13 @@ Each Lambda function gets its own IAM execution role with the **minimum permissi
 
 | Lambda | DynamoDB permissions | Other |
 |--------|---------------------|-------|
-| λ shorten | `dynamodb:PutItem` | — |
-| λ redirect | `dynamodb:GetItem` | ElastiCache access via VPC security group |
-| λ analytics | `dynamodb:PutItem` | `sqs:ReceiveMessage`, `sqs:DeleteMessage` |
+| λ shorten | `dynamodb:GetItem`, `dynamodb:PutItem` (both on `url-mappings`) | `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` (CloudWatch, via `AWSLambdaBasicExecutionRole`) |
+| λ redirect | `dynamodb:GetItem` (on `url-mappings`) | ElastiCache access via VPC security group (network-level, not IAM); `sqs:SendMessage` (on the click-events queue); VPC ENI permissions via `AWSLambdaVPCAccessExecutionRole` (`ec2:CreateNetworkInterface`, `ec2:DescribeNetworkInterfaces`, `ec2:DeleteNetworkInterface`); CloudWatch logging as above |
+| λ analytics | `dynamodb:PutItem` (on `click-events`) | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` (on the click-events queue); CloudWatch logging as above |
+
+> **Correction (verified against actual code, not just the original design):** `λ shorten` requires `dynamodb:GetItem` in addition to `PutItem` — `UrlService.shorten()` calls `ShortCodeGenerator.generateUnique(dynamoDbRepository::exists)`, and `exists()` performs a `getItem` read to check for short-code collisions before saving. The original table above only listed `PutItem`, which would have caused every shorten request to fail once real least-privilege IAM policies were enforced. Caught during Step 12 IAM provisioning, before any Terraform was written against it.
+>
+> Also added: every Lambda needs baseline CloudWatch Logs permissions to write logs at all (commonly granted via the AWS managed policy `AWSLambdaBasicExecutionRole`), and `λ redirect` specifically needs VPC networking permissions to attach to the VPC (via `AWSLambdaVPCAccessExecutionRole`), since it's the one VPC-attached function.
 
 **Never:**
 - Use `dynamodb:*` wildcard permissions
@@ -859,18 +863,7 @@ This class is the analytics Lambda's entry point. In production it gets invoked 
 
 ### 17.8 IAM Updates
 
-Add to λ analytics IAM role (Section 16.5):
-```
-sqs:ReceiveMessage
-sqs:DeleteMessage
-sqs:GetQueueAttributes
-dynamodb:PutItem  (on click-events table only)
-```
-
-Add to λ redirect IAM role:
-```
-sqs:SendMessage  (on the analytics queue only)
-```
+> Superseded by the corrected, authoritative table in Section 16.5, which now reflects these SQS additions plus the `λ shorten` GetItem correction found during Step 12 IAM provisioning. See Section 16.5 for the full, current permission set per Lambda.
 
 ---
 
