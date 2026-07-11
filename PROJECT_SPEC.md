@@ -141,6 +141,8 @@ See Section 6 for full architecture details.
 - **Internet Gateway** is present in the VPC but unused — no public internet traffic ever enters the VPC. Only internal AWS traffic (Lambda → ElastiCache) flows through the private subnet.
 - Lambda: shorten and Lambda: analytics run **outside the VPC**.
 
+> ⚠️ **Real gap identified during `vpc.tf` implementation (Step 12b):** once `λ redirect` is VPC-attached, its security group (Section 16.8) is scoped to outbound port 6379 to ElastiCache *only*. But `λ redirect` also calls DynamoDB (on cache miss) and SQS (fire-and-forget analytics per Section 17.3/17.9) — those calls will be silently blocked at the network layer once the Lambda is actually deployed inside the VPC, since nothing currently allows that outbound traffic. **Fix: add VPC Endpoints for DynamoDB and SQS** (not a NAT Gateway — that's for general internet access and costs continuously; this project only needs specific AWS service reachability, which VPC Endpoints provide privately and without ongoing NAT cost). Must be resolved in Terraform (likely a new `vpc_endpoints.tf`, or added to `vpc.tf`) before `lambda.tf` is written and `λ redirect` is actually deployed — otherwise it will appear to deploy successfully but hang/fail on every DynamoDB/SQS call at runtime.
+
 ### Traffic Flows
 
 **Loading the frontend:**
