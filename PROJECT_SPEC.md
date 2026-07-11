@@ -188,6 +188,10 @@ implementation("com.amazonaws:aws-lambda-java-events")
 >
 > **Fixes:** (a) add `spring.main.lazy-initialization: true` to `application.yml` so beans are only created on first actual use — neutralizes the Redis risk since `shorten` never calls `cacheRepository`; (b) give **all three** Lambda functions in `lambda.tf` the identical, full set of app environment variables, even ones a given function doesn't functionally use, since Spring requires every referenced property to resolve at startup regardless of which function is running.
 
+> ⚠️ **Third gap, identified before writing `api_gateway.tf`:** `StreamLambdaHandler` uses `SpringBootLambdaContainerHandler.getAwsProxyHandler(...)`, which expects the **API Gateway REST API (v1) proxy event format**. A modern HTTP API (v2) with its default `payload_format_version = "2.0"` sends a differently-shaped event that this handler cannot parse — every request would fail despite correct IAM/networking/handler wiring. **Fix:** use HTTP API (v2) for its simplicity/cost, but explicitly set `payload_format_version = "1.0"` on both Lambda integrations, which makes HTTP API v2 emit the older, REST-API-v1-shaped event `StreamLambdaHandler` already expects.
+>
+> **CORS is not configured at the API Gateway layer** — `UrlController`'s existing, tested `@CrossOrigin` annotation already handles CORS entirely in Spring (Section 16.3). Configuring it a second time at API Gateway risks conflicting behavior between the two layers.
+
 ### Caching Strategy
 - **Pattern:** Cache-aside (lazy loading)
 - **Cache population:** On first cache miss, load from DynamoDB and write to Redis
