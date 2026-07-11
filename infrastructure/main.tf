@@ -6,6 +6,12 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    # Used to build a trivial placeholder Lambda deployment package until the
+    # CI/CD pipeline (Step 13) ships the real JAR.
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 
   # Remote state (Section 19.5) — intentionally commented out for now. Local

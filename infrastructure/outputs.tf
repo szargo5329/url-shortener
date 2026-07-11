@@ -44,3 +44,33 @@ output "redis_reader_endpoint" {
   description = "ElastiCache reader endpoint (distributes reads across replicas)."
   value       = aws_elasticache_replication_group.main.reader_endpoint_address
 }
+
+output "shorten_function_name" {
+  description = "Name of the shorten Lambda function."
+  value       = aws_lambda_function.shorten.function_name
+}
+
+output "shorten_function_arn" {
+  description = "ARN of the shorten Lambda function."
+  value       = aws_lambda_function.shorten.arn
+}
+
+output "redirect_function_name" {
+  description = "Name of the redirect Lambda function."
+  value       = aws_lambda_function.redirect.function_name
+}
+
+output "redirect_function_arn" {
+  description = "ARN of the redirect Lambda function."
+  value       = aws_lambda_function.redirect.arn
+}
+
+output "analytics_function_name" {
+  description = "Name of the analytics Lambda function."
+  value       = aws_lambda_function.analytics.function_name
+}
+
+output "analytics_function_arn" {
+  description = "ARN of the analytics Lambda function."
+  value       = aws_lambda_function.analytics.arn
+}

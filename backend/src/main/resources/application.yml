@@ -1,6 +1,11 @@
 spring:
   application:
     name: url-shortener
+  main:
+    # Create beans only on first use. On Lambda cold start this avoids eagerly
+    # constructing beans a given function never uses — notably the Redis
+    # connection factory in the non-VPC shorten function (Section 6, gap 2).
+    lazy-initialization: true
   data:
     redis:
       host: ${REDIS_HOST:localhost}
