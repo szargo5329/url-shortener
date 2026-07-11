@@ -163,6 +163,24 @@ User → Route 53 (myapp.io/{code}) → API Gateway → Lambda: redirect
   → SQS (async, fire-and-forget → λ analytics → click-events DynamoDB table)
 ```
 
+### Lambda Handler Wiring
+
+> ⚠️ **Gap identified before writing `lambda.tf` (Step 12b):** `aws-serverless-java-container-springboot3` is present in `build.gradle.kts`, but no class in the codebase actually implements the handler interface it requires. `AnalyticsEventConsumer` is a `Consumer<String>` (Spring Cloud Function shape) but has no AWS-specific entry point wired up either. Both need to be added before `lambda.tf`'s `handler` attribute can reference real, compiled classes.
+
+**λ shorten and λ redirect — same JAR, same handler class, two separate Lambda function resources:**
+- Both are HTTP-triggered through the same Spring Boot app, so they share one deployment package and one handler class implementing `RequestStreamHandler` (from `aws-lambda-java-core`), wrapping `SpringBootLambdaContainerHandler` from `aws-serverless-java-container-springboot3`.
+- They exist as **two separate Lambda function resources** (not one) because **VPC attachment is a per-function setting** — only `redirect` needs it (for ElastiCache). Keeping `shorten` non-VPC-attached avoids the VPC cold-start penalty it doesn't need.
+- API Gateway routes `POST /shorten` to the shorten function's ARN and `GET /{code}` to the redirect function's ARN — same underlying code, different function identity and different network configuration.
+
+**λ analytics — different trigger, different handler shape:**
+- SQS-triggered, not HTTP-triggered. Needs `aws-lambda-java-events` (not yet in `build.gradle.kts`) and a class implementing `RequestHandler<SQSEvent, Void>`, which wraps the existing `AnalyticsEventConsumer.accept(String)` for each record in the batch.
+
+**New `build.gradle.kts` dependencies needed:**
+```kotlin
+implementation("com.amazonaws:aws-lambda-java-core")
+implementation("com.amazonaws:aws-lambda-java-events")
+```
+
 ### Caching Strategy
 - **Pattern:** Cache-aside (lazy loading)
 - **Cache population:** On first cache miss, load from DynamoDB and write to Redis
@@ -326,7 +344,7 @@ Claude Code should scaffold in this order:
 11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
 12. **AWS infrastructure provisioning** — split into four parts. See Section 19 for full details.
     - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform.
-    - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles.
+    - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics; **requires actual Lambda handler classes to exist first — see Section 6's "Lambda Handler Wiring" subsection, a gap identified before this step**), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles.
     - 12c. **Console-managed (manual, one-off)** — Route 53 domain registration, ACM certificate request + validation, AWS Budget alert.
     - 12d. **CloudWatch monitoring & alarms (minimal MVP scope)** — added after 12b, since it requires Lambda and API Gateway to already exist. See new Section 20 for full details. Not deferred to V2 — deploying without any failure notification was identified as a real production gap, not a nice-to-have.
 13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
