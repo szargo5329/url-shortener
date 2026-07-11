@@ -74,3 +74,8 @@ output "analytics_function_arn" {
   description = "ARN of the analytics Lambda function."
   value       = aws_lambda_function.analytics.arn
 }
+
+output "api_gateway_invoke_url" {
+  description = "Base invoke URL of the HTTP API (shorten + redirect routes)."
+  value       = aws_apigatewayv2_stage.default.invoke_url
+}
