@@ -96,3 +96,83 @@ resource "aws_vpc_security_group_egress_rule" "redirect_to_elasticache" {
   ip_protocol                  = "tcp"
   description                  = "Redis to ElastiCache"
 }
+
+# --- VPC Endpoints (Section 6, VPC-attached redirect Lambda gap fix) --------
+# The redirect Lambda runs inside the VPC with egress locked down, so its calls
+# to DynamoDB (cache miss) and SQS (fire-and-forget analytics) would otherwise be
+# blocked. VPC Endpoints give private, in-VPC reachability to those AWS services
+# without a NAT Gateway (no ongoing NAT cost, no public internet path).
+
+# DynamoDB — GATEWAY endpoint: free, no ENI. It works by injecting a route to
+# DynamoDB's managed prefix list into the VPC route table, so it is associated
+# with a route table rather than subnets/security groups.
+resource "aws_vpc_endpoint" "dynamodb" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.aws_region}.dynamodb"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_vpc.main.main_route_table_id]
+
+  tags = {
+    Name = "url-shortener-dynamodb-endpoint"
+  }
+}
+
+# SQS interface endpoint's own security group: allow HTTPS (443) inbound ONLY
+# from the redirect Lambda's SG — same least-privilege pattern as ElastiCache.
+resource "aws_security_group" "sqs_endpoint" {
+  name        = "url-shortener-sqs-endpoint"
+  description = "SQS interface endpoint - inbound 443 from the redirect Lambda only"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "url-shortener-sqs-endpoint"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "sqs_endpoint_from_redirect" {
+  security_group_id            = aws_security_group.sqs_endpoint.id
+  referenced_security_group_id = aws_security_group.redirect_lambda.id
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  description                  = "HTTPS from redirect Lambda"
+}
+
+# SQS — INTERFACE endpoint: creates ENIs in both private subnets (hourly cost),
+# reached over HTTPS. private_dns_enabled routes the SDK's normal sqs.<region>
+# hostname to these private ENIs.
+resource "aws_vpc_endpoint" "sqs" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.sqs"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.sqs_endpoint.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name = "url-shortener-sqs-endpoint"
+  }
+}
+
+# Redirect Lambda additionally needs outbound 443 to the SQS interface endpoint
+# to publish click events.
+resource "aws_vpc_security_group_egress_rule" "redirect_to_sqs_endpoint" {
+  security_group_id            = aws_security_group.redirect_lambda.id
+  referenced_security_group_id = aws_security_group.sqs_endpoint.id
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  description                  = "HTTPS to SQS endpoint"
+}
+
+# Redirect Lambda also needs outbound 443 to DynamoDB on cache miss. The gateway
+# endpoint has no security group, so egress is scoped to DynamoDB's managed prefix
+# list (exposed by the endpoint) rather than an SG reference.
+resource "aws_vpc_security_group_egress_rule" "redirect_to_dynamodb" {
+  security_group_id = aws_security_group.redirect_lambda.id
+  prefix_list_id    = aws_vpc_endpoint.dynamodb.prefix_list_id
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "HTTPS to DynamoDB gateway endpoint"
+}
