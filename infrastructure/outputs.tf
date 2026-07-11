@@ -1,9 +1,7 @@
 # Terraform output values for the url-shortener infrastructure.
 #
 # More outputs will be added as resources are created in Step 12b, such as:
-#   - API Gateway invoke URL
 #   - CloudFront distribution domain name
-#   - S3 frontend bucket name
 
 output "url_mappings_table_name" {
   description = "Name of the DynamoDB table storing short-code → URL mappings."
@@ -78,4 +76,14 @@ output "analytics_function_arn" {
 output "api_gateway_invoke_url" {
   description = "Base invoke URL of the HTTP API (shorten + redirect routes)."
   value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
+output "frontend_bucket_name" {
+  description = "Name of the S3 bucket hosting the frontend static files."
+  value       = aws_s3_bucket.frontend.bucket
+}
+
+output "frontend_bucket_arn" {
+  description = "ARN of the frontend S3 bucket."
+  value       = aws_s3_bucket.frontend.arn
 }
