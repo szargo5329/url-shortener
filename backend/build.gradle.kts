@@ -43,6 +43,10 @@ dependencies {
     // AWS Lambda adapter for Spring Boot 3
     implementation("com.amazonaws.serverless:aws-serverless-java-container-springboot3:2.1.5")
 
+    // AWS Lambda runtime interfaces + event models (handler entry points)
+    implementation("com.amazonaws:aws-lambda-java-core:1.2.3")
+    implementation("com.amazonaws:aws-lambda-java-events:3.11.4")
+
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
