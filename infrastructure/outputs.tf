@@ -3,7 +3,6 @@
 # More outputs will be added as resources are created in Step 12b, such as:
 #   - API Gateway invoke URL
 #   - CloudFront distribution domain name
-#   - ElastiCache primary endpoint
 #   - S3 frontend bucket name
 
 output "url_mappings_table_name" {
@@ -34,4 +33,14 @@ output "vpc_id" {
 output "private_subnet_ids" {
   description = "IDs of the two private subnets (AZs a and b)."
   value       = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+
+output "redis_primary_endpoint" {
+  description = "ElastiCache primary (write) endpoint — what REDIS_HOST is set to."
+  value       = aws_elasticache_replication_group.main.primary_endpoint_address
+}
+
+output "redis_reader_endpoint" {
+  description = "ElastiCache reader endpoint (distributes reads across replicas)."
+  value       = aws_elasticache_replication_group.main.reader_endpoint_address
 }
