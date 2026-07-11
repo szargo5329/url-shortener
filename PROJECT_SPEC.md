@@ -181,6 +181,13 @@ implementation("com.amazonaws:aws-lambda-java-core")
 implementation("com.amazonaws:aws-lambda-java-events")
 ```
 
+> ⚠️ **Second gap, identified while scoping `lambda.tf` (Step 12b):** all three Lambda functions boot the **entire** Spring Boot application context, not just the beans each one needs — `StreamLambdaHandler` wraps the whole app for shorten/redirect, and `AnalyticsLambdaHandler`'s `WebApplicationType.NONE` context still creates every bean, it just skips starting a web server. Two consequences:
+>
+> 1. **`app.dynamodb.click-events-table-name` and `app.sqs.queue-url` have no defaults in `application.yml`.** If any function's environment variables omit them, Spring Boot fails to start entirely on cold start — not a functional gap, a total crash. Since `shorten` boots the full context (including `AnalyticsService`, which requires `SQS_QUEUE_URL`), it needs every required property set even though it never functionally uses SQS or the click-events table.
+> 2. **`shorten` isn't VPC-attached but still constructs `RedisConfig`'s connection factory**, pointed at a Redis endpoint only reachable from inside the VPC. Risk of a hang/failure on cold start depending on connection eagerness.
+>
+> **Fixes:** (a) add `spring.main.lazy-initialization: true` to `application.yml` so beans are only created on first actual use — neutralizes the Redis risk since `shorten` never calls `cacheRepository`; (b) give **all three** Lambda functions in `lambda.tf` the identical, full set of app environment variables, even ones a given function doesn't functionally use, since Spring requires every referenced property to resolve at startup regardless of which function is running.
+
 ### Caching Strategy
 - **Pattern:** Cache-aside (lazy loading)
 - **Cache population:** On first cache miss, load from DynamoDB and write to Redis
