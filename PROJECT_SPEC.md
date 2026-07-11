@@ -322,10 +322,11 @@ Claude Code should scaffold in this order:
 10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class. **STATUS: COMPLETE.**
 10b. **Link expiration (fixed 7-day MVP default)** — added to scope after Step 10. See Section 15 for full details. Update `UrlService.shorten()` to set a real `expiresAt`, update `UrlService.redirect()` to check expiry, add `app.link.expiration-days` config. Update the existing `UrlServiceTest` test that asserts null `expiresAt`, add a new test for the expired-link 404 case.
 11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
-12. **AWS infrastructure provisioning** — split into three parts. See Section 19 for full details.
+12. **AWS infrastructure provisioning** — split into four parts. See Section 19 for full details.
     - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform.
     - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles.
     - 12c. **Console-managed (manual, one-off)** — Route 53 domain registration, ACM certificate request + validation, AWS Budget alert.
+    - 12d. **CloudWatch monitoring & alarms (minimal MVP scope)** — added after 12b, since it requires Lambda and API Gateway to already exist. See new Section 20 for full details. Not deferred to V2 — deploying without any failure notification was identified as a real production gap, not a nice-to-have.
 13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
 14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
 15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table.
@@ -383,6 +384,7 @@ The following are **planned future iterations** — do NOT implement or scaffold
 - `PATCH /links/{code}`
 - SQS analytics pipeline — moved to MVP scope, implemented in Step 9. See Section 17.
 - ~~Terraform / CDK infrastructure as code~~ — MOVED INTO SCOPE. See Section 19.
+- CloudWatch Dashboards, anomaly detection, Slack/PagerDuty integration — genuinely deferred. **Basic CloudWatch Alarms (Lambda errors, API Gateway 5xx, DynamoDB throttling) via SNS email ARE in MVP scope** — see Section 20. Deploying with zero failure notification was judged a real production gap, not a nice-to-have.
 
 
 ---
@@ -1044,6 +1046,10 @@ Manually clicking through the AWS Console to create resources is fine for learni
 
 This is also a genuinely high-value skill for a backend/cloud portfolio — Infrastructure as Code is one of the most commonly requested skills in cloud and backend job postings.
 
+**Standing naming convention (decided once, applies to all resources going forward):** no environment-prefixed naming (e.g. `${var.environment}-url-mappings`) anywhere in this project. There is only one AWS environment — bare resource names (`url-mappings`, `click-events`) are used consistently across DynamoDB, SQS, and everything after. This does not need to be re-asked per resource file.
+
+**Terraform resource naming convention:** `<action>-lambda` pattern (e.g. `shorten_lambda_role`, not `lambda_shorten_role`) — decided during IAM implementation, applies to all Terraform resource labels going forward.
+
 ---
 
 ### 19.2 Split: Terraform-managed vs Console-managed
@@ -1126,4 +1132,76 @@ Whether the CI/CD pipeline (Section 14) automatically runs `terraform plan`/`ter
 - Do not commit `.tfstate` files to Git (add to `.gitignore`)
 - Do not commit `terraform.tfvars` if it contains sensitive values
 - Do not run `terraform destroy` without understanding exactly what it will remove
+
+
+---
+
+## 20. CloudWatch Monitoring & Alarms
+
+> Added to MVP scope after Step 12b (Terraform infrastructure). **Not deferred to V2.** Deploying a production application with zero automatic failure notification is a real gap, not a nice-to-have — the value of alarms is having them in place *before* something breaks, not adding them after the fact once traffic already exists.
+
+---
+
+### 20.1 What's Already Automatic (No Work Needed)
+
+**CloudWatch Logs** — every Lambda IAM role (Section 16.5) has `AWSLambdaBasicExecutionRole` attached, which grants `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`. All Lambda output (including `log.error(...)` calls, e.g. `AnalyticsService`'s exception swallowing) automatically flows into CloudWatch Logs with zero extra configuration.
+
+**CloudWatch Metrics** — AWS publishes baseline metrics automatically for every relevant resource the moment it exists: Lambda (invocations, duration, errors, throttles), DynamoDB (capacity, throttled requests), SQS (messages sent/received/visible), API Gateway (4xx/5xx counts, latency), ElastiCache (CPU, connections, cache hit/miss). No Terraform resource is required to get these — they exist by default.
+
+### 20.2 What This Section Actually Adds — Minimal, Not Full Observability
+
+This is a **scoped-down** monitoring setup — a handful of alarms that catch the failure modes that actually matter at this project's scale, not a full dashboard/observability platform.
+
+**In scope:**
+- One SNS topic, with an email subscription, that all alarms notify
+- Lambda error rate alarm — one per function (shorten, redirect, analytics)
+- API Gateway 5xx alarm — catches broad API failures
+- DynamoDB throttled requests alarm — catches abuse or unexpected load, one per table or combined
+
+**Explicitly deferred to V2 (genuine future work, not urgent):**
+- CloudWatch Dashboards (visual aggregation — nice for demos, not a safety mechanism)
+- Anomaly detection alarms
+- Composite/multi-condition alarms
+- PagerDuty/Slack integration (email via SNS is sufficient for a solo project)
+
+### 20.3 Implementation
+
+New Terraform file: `infrastructure/monitoring.tf`
+
+```hcl
+# SNS topic all alarms notify. Single topic + email subscription is
+# sufficient at this scale — no need for PagerDuty/Slack integration.
+resource "aws_sns_topic" "alerts" {
+  name = "url-shortener-alerts"
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email   # new variable, your email address
+}
+```
+
+Then one `aws_cloudwatch_metric_alarm` resource per:
+- Each Lambda's `Errors` metric (namespace `AWS/Lambda`, dimension `FunctionName`)
+- API Gateway's `5XXError` metric (namespace `AWS/ApiGateway`)
+- DynamoDB's `ThrottledRequests` metric per table (namespace `AWS/DynamoDB`)
+
+Each alarm's `alarm_actions` points at `aws_sns_topic.alerts.arn`.
+
+### 20.4 New Variable Needed
+
+Add to `variables.tf`:
+```hcl
+variable "alert_email" {
+  description = "Email address to receive CloudWatch alarm notifications via SNS."
+  type        = string
+}
+```
+
+No default — this is personal and must be supplied via `terraform.tfvars` (already gitignored) or an environment variable, never committed.
+
+### 20.5 One-Time Manual Step After Apply
+
+AWS requires **email confirmation** for SNS email subscriptions — after `terraform apply`, check your inbox for a "AWS Notification - Subscription Confirmation" email and click confirm. Alarms will not actually notify you until this is done. This is one of the rare cases (similar to Section 19.2's console-managed exceptions) where a manual step is unavoidable regardless of IaC.
 
