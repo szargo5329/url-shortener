@@ -104,7 +104,7 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
 
 ### Infrastructure (AWS)
 - **IaC tool:** Terraform — manages all core application infrastructure (see Section 19)
-- **Manually provisioned (console):** domain registration, ACM certificate, AWS Budget alert — see Section 19.2 for full rationale
+- **Manually provisioned (console):** AWS Budget alert (urgent — see Step 12c-i), domain registration and ACM certificate (deferred to its own session — see Step 12c-ii) — see Section 19.2 for full rationale
 See Section 6 for full architecture details.
 
 ---
@@ -353,11 +353,12 @@ Claude Code should scaffold in this order:
 10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class. **STATUS: COMPLETE.**
 10b. **Link expiration (fixed 7-day MVP default)** — added to scope after Step 10. See Section 15 for full details. Update `UrlService.shorten()` to set a real `expiresAt`, update `UrlService.redirect()` to check expiry, add `app.link.expiration-days` config. Update the existing `UrlServiceTest` test that asserts null `expiresAt`, add a new test for the expired-link 404 case.
 11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
-12. **AWS infrastructure provisioning** — split into four parts. See Section 19 for full details.
+12. **AWS infrastructure provisioning** — split into five parts. See Section 19 for full details.
     - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform.
-    - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics; **requires actual Lambda handler classes to exist first — see Section 6's "Lambda Handler Wiring" subsection, a gap identified before this step**), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles.
-    - 12c. **Console-managed (manual, one-off)** — Route 53 domain registration, ACM certificate request + validation, AWS Budget alert.
-    - 12d. **CloudWatch monitoring & alarms (minimal MVP scope)** — added after 12b, since it requires Lambda and API Gateway to already exist. See new Section 20 for full details. Not deferred to V2 — deploying without any failure notification was identified as a real production gap, not a nice-to-have.
+    - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics; **requires actual Lambda handler classes to exist first — see Section 6's "Lambda Handler Wiring" subsection, a gap identified before this step**), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles. **STATUS: COMPLETE.**
+    - 12c-i. **AWS Budget alert — NOT deferred, do this immediately after 12d.** Split out from the original 12c because ElastiCache (Multi-AZ, always-on) and the SQS VPC interface endpoint have been accruing real hourly cost since Step 12b was applied, with zero financial safety net in place. Same "deploying without a safety net" reasoning as 12d's monitoring, applied to cost instead of operational health. Takes ~3 minutes, no domain decision required. See Section 16.7.
+    - 12c-ii. **Domain registration + ACM cert + Route 53 records — genuinely fine to keep deferred** until a domain name is chosen and purchased. Its own dedicated session, separate from everything else.
+    - 12d. **CloudWatch monitoring & alarms (minimal MVP scope)** — added after 12b, since it requires Lambda and API Gateway to already exist. See Section 20 for full details. Not deferred to V2 — deploying without any failure notification was identified as a real production gap, not a nice-to-have. **STATUS: COMPLETE.**
 13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
 14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
 15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table.
