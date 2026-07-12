@@ -94,3 +94,8 @@ output "cloudfront_distribution_id" {
   description = "CloudFront distribution ID (for cache invalidations in CI/CD)."
   value       = aws_cloudfront_distribution.frontend.id
 }
+
+output "sns_alerts_topic_arn" {
+  description = "ARN of the SNS topic that CloudWatch alarms notify."
+  value       = aws_sns_topic.alerts.arn
+}

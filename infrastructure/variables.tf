@@ -29,3 +29,10 @@ variable "link_expiration_days" {
   type        = number
   default     = 7
 }
+
+# No default (Section 20.4) — personal, must be supplied via terraform.tfvars
+# (gitignored) or an environment variable, never committed.
+variable "alert_email" {
+  description = "Email address to receive CloudWatch alarm notifications via SNS."
+  type        = string
+}
