@@ -1215,7 +1215,7 @@ resource "aws_sns_topic_subscription" "email" {
 
 Then one `aws_cloudwatch_metric_alarm` resource per:
 - Each Lambda's `Errors` metric (namespace `AWS/Lambda`, dimension `FunctionName`)
-- API Gateway's `5XXError` metric (namespace `AWS/ApiGateway`)
+- API Gateway's `5xx` metric, dimensioned by `ApiId` (namespace `AWS/ApiGateway`) — **note:** `5XXError`/`ApiName` are REST API (v1) metric names and do not apply to this project's HTTP API (v2); this correction was found and applied during Step 12d implementation
 - DynamoDB's `ThrottledRequests` metric per table (namespace `AWS/DynamoDB`)
 
 Each alarm's `alarm_actions` points at `aws_sns_topic.alerts.arn`.
