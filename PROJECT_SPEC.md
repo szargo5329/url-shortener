@@ -443,6 +443,10 @@ Since the project lives on GitHub, GitHub Actions is the natural fit — free fo
 Push / PR → Checkout → Set up Java 21 → Gradle build → Run tests → Build Lambda JAR → (on main only) Deploy to AWS Lambda
 ```
 
+> ⚠️ **Gap identified before implementing Step 13:** Spring Boot's default `bootJar` task produces a nested-structure fat jar (`BOOT-INF/classes`, `BOOT-INF/lib/*.jar`) designed for Spring Boot's own launcher via `java -jar`. AWS Lambda's Java runtime loads classes off a **flat classpath** and invokes the handler directly via reflection — it does not run `java -jar` and cannot unpack Spring Boot's nested structure. Deploying the standard `bootJar` as-is would report a successful deploy but fail every invocation with `ClassNotFoundException` on the handler class. **Fix:** add the Gradle Shadow plugin (`com.gradleup.shadow` or `com.github.johnrengelman.shadow`) to produce a genuinely flat uber-jar (all classes and dependency classes merged at the jar root, no nesting) — the standard, documented packaging approach for `aws-serverless-java-container` + Spring Boot on Lambda. The CI/CD deploy step zips this shadow jar output, not `bootJar`'s output.
+
+> **Deploy trigger clarification:** the deploy step fires only on push to `main`, never on push to `dev` — consistent with the branching model established earlier (`main` = stable/milestone, `dev` = day-to-day work-in-progress). Auto-deploying every `dev` push would push unfinished work to production.
+
 **Frontend (on every push to `main` and on every PR):**
 ```
 Push / PR → Checkout → Node setup → npm install → TypeScript check → Vite build → (on main only) Upload dist/ to S3 → Invalidate CloudFront cache
@@ -457,16 +461,23 @@ Push / PR → Checkout → Node setup → npm install → TypeScript check → V
 ```
 
 ### Required GitHub Secrets
+
+> **Decision (made during Step 13 implementation):** GitHub Actions authenticates to AWS via **OIDC federation**, not static IAM access keys — consistent with this project's pattern of choosing the current, correct AWS approach throughout (OAC, VPC Endpoints, Multi-AZ, IaC). No long-lived AWS credentials are stored in GitHub at all; GitHub issues a short-lived token per workflow run, AWS validates it against a trust policy scoped to this specific repo, and issues temporary credentials that expire when the job ends.
+
 These get stored in GitHub repo Settings → Secrets and must be configured before the deploy steps work:
 ```
-AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY
+AWS_DEPLOY_ROLE_ARN     — the CI/CD IAM role's ARN (not a secret value per se, but stored as one for easy rotation)
 AWS_REGION
 LAMBDA_FUNCTION_NAME_SHORTEN
 LAMBDA_FUNCTION_NAME_REDIRECT
+LAMBDA_FUNCTION_NAME_ANALYTICS
 S3_BUCKET_NAME
 CLOUDFRONT_DISTRIBUTION_ID
 ```
+
+**AWS-side prerequisite (Terraform-managed, `infrastructure/ci_cd.tf`):**
+- One `aws_iam_openid_connect_provider` trusting `https://token.actions.githubusercontent.com` (account-level, one-time — not per-repo)
+- One IAM role with a trust policy scoped to this specific GitHub repo (via a condition on the token's `sub` claim), and a permission policy limited to `lambda:UpdateFunctionCode` on exactly the three function ARNs — nothing broader
 
 ### Branches
 - `main` — production. Every merge triggers a full build + deploy.
