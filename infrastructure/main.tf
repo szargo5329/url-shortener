@@ -12,6 +12,11 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    # Used to fetch GitHub's OIDC TLS thumbprint dynamically (see ci_cd.tf).
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
   # Remote state (Section 19.5) — intentionally commented out for now. Local

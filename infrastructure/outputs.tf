@@ -99,3 +99,8 @@ output "sns_alerts_topic_arn" {
   description = "ARN of the SNS topic that CloudWatch alarms notify."
   value       = aws_sns_topic.alerts.arn
 }
+
+output "github_actions_deploy_role_arn" {
+  description = "ARN of the IAM role GitHub Actions assumes via OIDC to deploy Lambda code."
+  value       = aws_iam_role.github_actions_deploy.arn
+}
