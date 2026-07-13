@@ -2,6 +2,8 @@ plugins {
     java
     id("org.springframework.boot") version "3.4.1"
     id("io.spring.dependency-management") version "1.1.7"
+    // Produces the flat uber-jar AWS Lambda needs (Section 14 packaging gap).
+    id("com.gradleup.shadow") version "9.0.0"
 }
 
 group = "com.urlshortener"
@@ -54,4 +56,21 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// Flat uber-jar for AWS Lambda: all application + dependency classes merged at
+// the jar root, NOT Spring Boot's nested BOOT-INF structure. Lambda loads classes
+// off a flat classpath and invokes the handler classes via reflection, so no
+// Main-Class is required in the manifest.
+tasks.shadowJar {
+    archiveClassifier.set("aws")
+
+    // Flattening collapses many jars into one, so metadata that exists in several
+    // dependencies must be merged rather than overwritten — otherwise Spring
+    // auto-configuration and service loaders silently lose entries.
+    mergeServiceFiles()
+    append("META-INF/spring.handlers")
+    append("META-INF/spring.schemas")
+    append("META-INF/spring.factories")
+    append("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")
 }
