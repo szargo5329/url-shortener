@@ -72,17 +72,17 @@ jobs:
       - name: Build Lambda uber-jar
         run: ./gradlew shadowJar --no-daemon
 
-      # Zip the flat uber-jar into a Lambda deployment package.
-      - name: Package deployment zip
-        run: |
-          JAR=$(ls build/libs/*-aws.jar)
-          zip -j lambda-deploy.zip "$JAR"
+      # Resolve the shadow jar path once and expose it to later steps. The .jar
+      # IS the deployment package — Lambda unpacks it directly (Section 14, gap 2).
+      # Wrapping it in an outer zip would break the handler classpath.
+      - name: Resolve Lambda artifact path
+        run: echo "LAMBDA_JAR=$(ls "$PWD"/build/libs/*-aws.jar)" >> "$GITHUB_ENV"
 
       - name: Deploy shorten function
-        run: aws lambda update-function-code --function-name url-shortener-shorten --zip-file fileb://lambda-deploy.zip
+        run: aws lambda update-function-code --function-name url-shortener-shorten --zip-file fileb://$LAMBDA_JAR
 
       - name: Deploy redirect function
-        run: aws lambda update-function-code --function-name url-shortener-redirect --zip-file fileb://lambda-deploy.zip
+        run: aws lambda update-function-code --function-name url-shortener-redirect --zip-file fileb://$LAMBDA_JAR
 
       - name: Deploy analytics function
-        run: aws lambda update-function-code --function-name url-shortener-analytics --zip-file fileb://lambda-deploy.zip
+        run: aws lambda update-function-code --function-name url-shortener-analytics --zip-file fileb://$LAMBDA_JAR
