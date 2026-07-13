@@ -241,15 +241,28 @@ clicked_at   (String) — ISO-8601 timestamp, sort key
 
 ## 7. Project Structure
 
+> ✅ **Status: matches the actual repository as of Step 13 completion.** Backend fully implemented and deployed; infrastructure fully provisioned via Terraform; frontend not yet scaffolded (Step 14).
+
 ```
 url-shortener/
-├── backend/                          # Spring Boot Java application
+├── .github/
+│   └── workflows/
+│       └── backend.yml               # Build+test on every push; deploy on push to main (OIDC)
+├── assets/
+│   ├── shrt-architecture-diagram.png # Final architecture diagram (Multi-AZ, referenced in README)
+│   ├── url-shortener-mockup.png      # UI mockup screenshot
+│   └── url_shortener_cyberpunk_mockup.html  # Interactive HTML design reference for Step 14
+│
+├── backend/                          # Spring Boot Java application — COMPLETE
 │   ├── src/
 │   │   ├── main/
 │   │   │   ├── java/com/urlshortener/
 │   │   │   │   ├── UrlShortenerApplication.java
 │   │   │   │   ├── controller/
 │   │   │   │   │   └── UrlController.java              # REST endpoints
+│   │   │   │   ├── handler/
+│   │   │   │   │   ├── StreamLambdaHandler.java        # AWS entry point, shared by shorten + redirect
+│   │   │   │   │   └── AnalyticsLambdaHandler.java     # AWS entry point, SQS-triggered analytics
 │   │   │   │   ├── service/
 │   │   │   │   │   ├── UrlService.java                 # Core business logic
 │   │   │   │   │   ├── AnalyticsService.java           # SQS click event publisher
@@ -275,30 +288,39 @@ url-shortener/
 │   │   │   │       └── NotFoundException.java          # 404 Not Found
 │   │   │   └── resources/
 │   │   │       └── application.yml
-│   │   └── test/
-│   └── build.gradle.kts
+│   │   └── test/java/com/urlshortener/
+│   │       ├── controller/    # UrlControllerTest
+│   │       ├── repository/    # DynamoDbRepositoryTest, CacheRepositoryTest
+│   │       ├── service/       # UrlServiceTest, AnalyticsServiceTest
+│   │       └── util/          # ShortCodeGeneratorTest
+│   ├── build.gradle.kts                # Includes Shadow plugin — see Section 14 packaging gaps
+│   ├── gradlew / gradlew.bat
+│   └── settings.gradle.kts
 │
-├── frontend/                         # React + TypeScript application
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── UrlForm.tsx           # Main shorten form
-│   │   │   └── ResultCard.tsx        # Displays the shortened URL
-│   │   ├── services/
-│   │   │   └── api.ts                # API calls to backend
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   └── index.css
-│   ├── index.html
-│   ├── vite.config.ts
-│   ├── tailwind.config.ts
-│   └── package.json
+├── frontend/                         # React + TypeScript application — NOT YET SCAFFOLDED (Step 14)
 │
-├── infrastructure/                   # AWS IaC (Terraform) — see Section 19
-│   ├── main.tf                       # AWS provider config, remote state (commented, local for now)
-│   ├── variables.tf                  # aws_region, environment
-│   └── outputs.tf                    # Placeholder — table names, endpoint URLs added as resources are created
+├── infrastructure/                   # AWS IaC (Terraform) — COMPLETE, all 9 resource categories live
+│   ├── main.tf                       # AWS provider, archive + tls providers, remote state (commented, local for now)
+│   ├── variables.tf                  # aws_region, environment, base_short_url, frontend_origin, link_expiration_days, alert_email
+│   ├── outputs.tf                    # All resource outputs — table names, endpoints, ARNs, invoke URLs
+│   ├── dynamodb.tf                   # url-mappings + click-events tables
+│   ├── iam.tf                        # 3 least-privilege Lambda execution roles
+│   ├── sqs.tf                        # click-events queue
+│   ├── vpc.tf                        # VPC, Multi-AZ private subnets, security groups, VPC Endpoints (DynamoDB + SQS)
+│   ├── elasticache.tf                # Multi-AZ Redis replication group
+│   ├── lambda.tf                     # 3 Lambda functions (shorten, redirect, analytics) + SQS event source mapping
+│   ├── api_gateway.tf                # HTTP API, routes, throttling, Lambda permissions
+│   ├── s3.tf                         # Private frontend bucket + OAC bucket policy
+│   ├── cloudfront.tf                 # CDN distribution, OAC, default cert
+│   ├── monitoring.tf                 # SNS topic + 6 CloudWatch alarms (Step 12d)
+│   ├── ci_cd.tf                      # GitHub OIDC provider + scoped deploy role (Step 13)
+│   ├── terraform.tfvars              # gitignored — local values, incl. alert_email
+│   └── .terraform.lock.hcl           # Committed — locks provider versions
 │
-└── PROJECT_SPEC.md                   # This file
+├── .gitignore
+├── LICENSE                           # MIT
+├── PROJECT_SPEC.md                   # This file
+└── README.md
 ```
 
 ---
@@ -352,16 +374,16 @@ Claude Code should scaffold in this order:
 9. **SQS analytics pipeline** — implement async click tracking. See Section 6 and new Section 17 for full details. Files: `SqsConfig.java`, `AnalyticsService.java`, `AnalyticsEventConsumer.java`. Update `UrlService.redirect()` to fire-and-forget to SQS. Add `click-events` DynamoDB table schema. Add SQS dependency to `build.gradle.kts`.
 10. **Unit tests** — write tests for ShortCodeGenerator, DynamoDbRepository, CacheRepository, UrlService, UrlController, and AnalyticsService before moving to infrastructure. Pragmatic choice: getting deployed end-to-end teaches more than perfect coverage at this stage, so tests are batched after all backend classes are complete rather than written class-by-class. **STATUS: COMPLETE.**
 10b. **Link expiration (fixed 7-day MVP default)** — added to scope after Step 10. See Section 15 for full details. Update `UrlService.shorten()` to set a real `expiresAt`, update `UrlService.redirect()` to check expiry, add `app.link.expiration-days` config. Update the existing `UrlServiceTest` test that asserts null `expiresAt`, add a new test for the expired-link 404 case.
-11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14.
+11. **CI/CD pipeline (build + test only)** — `.github/workflows/backend.yml` that builds and runs tests on every push. No deploy step yet — infrastructure does not exist at this point. See Section 14. **STATUS: COMPLETE.**
 12. **AWS infrastructure provisioning** — split into five parts. See Section 19 for full details.
-    - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform.
+    - 12a. **Console orientation** — manually create and delete one simple resource (e.g. a DynamoDB table) in the AWS Console to build a mental model before writing Terraform. **STATUS: COMPLETE.**
     - 12b. **Terraform-managed infrastructure** — Lambda functions (shorten, redirect, analytics; **requires actual Lambda handler classes to exist first — see Section 6's "Lambda Handler Wiring" subsection, a gap identified before this step**), API Gateway, DynamoDB tables (url-mappings + click-events), ElastiCache + VPC + private subnets + security groups, SQS queue, S3 bucket, CloudFront, IAM roles. **STATUS: COMPLETE.**
-    - 12c-i. **AWS Budget alert — NOT deferred, do this immediately after 12d.** Split out from the original 12c because ElastiCache (Multi-AZ, always-on) and the SQS VPC interface endpoint have been accruing real hourly cost since Step 12b was applied, with zero financial safety net in place. Same "deploying without a safety net" reasoning as 12d's monitoring, applied to cost instead of operational health. Takes ~3 minutes, no domain decision required. See Section 16.7.
-    - 12c-ii. **Domain registration + ACM cert + Route 53 records — genuinely fine to keep deferred** until a domain name is chosen and purchased. Its own dedicated session, separate from everything else.
+    - 12c-i. **AWS Budget alert** — $40/month, 70% alert threshold. **STATUS: COMPLETE.**
+    - 12c-ii. **Domain registration + ACM cert + Route 53 records — genuinely fine to keep deferred** until a domain name is chosen and purchased. Its own dedicated session, separate from everything else. **STATUS: DEFERRED (intentional).**
     - 12d. **CloudWatch monitoring & alarms (minimal MVP scope)** — added after 12b, since it requires Lambda and API Gateway to already exist. See Section 20 for full details. Not deferred to V2 — deploying without any failure notification was identified as a real production gap, not a nice-to-have. **STATUS: COMPLETE.**
-13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml` and create `frontend.yml` with S3 sync + CloudFront cache invalidation. From this point every push to main auto-deploys.
-14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11.
-15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table.
+13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml`. From this point every push to `main` auto-deploys real code via OIDC federation (Section 14). **STATUS: COMPLETE — verified working end-to-end via live `curl` tests: `POST /shorten` returns real 201 responses, `GET /{code}` returns real 302 redirects, click events confirmed landing in the `click-events` DynamoDB table via the full async SQS → analytics Lambda pipeline.** `frontend.yml` deferred to Step 14, once a frontend exists to deploy.
+14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11. **STATUS: NOT STARTED.**
+15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table. **STATUS: PARTIALLY COMPLETE — backend flow fully verified via curl (Step 13); frontend-driven verification pending Step 14.**
 
 ---
 
