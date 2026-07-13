@@ -1,7 +1,7 @@
 name: Backend CI
 
-# Build + test only. No deploy step yet — AWS infrastructure does not exist
-# until Step 12; the deploy stage (Section 14) is added then.
+# Build + test on every push/PR. Deploy Lambda code only on push to main, via
+# GitHub Actions OIDC federation (Section 14) — no static AWS credentials.
 on:
   push:
     branches: [main, dev]
@@ -35,3 +35,54 @@ jobs:
       # Fails the job (and thus the workflow) on any test failure.
       - name: Build and run tests
         run: ./gradlew clean test --no-daemon
+
+  deploy:
+    name: Deploy Lambda code
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    # Only a push to main deploys — never dev, never pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write # required to request the OIDC token
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Assume the deploy role via OIDC — short-lived credentials, no secrets keys.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Build Lambda uber-jar
+        run: ./gradlew shadowJar --no-daemon
+
+      # Zip the flat uber-jar into a Lambda deployment package.
+      - name: Package deployment zip
+        run: |
+          JAR=$(ls build/libs/*-aws.jar)
+          zip -j lambda-deploy.zip "$JAR"
+
+      - name: Deploy shorten function
+        run: aws lambda update-function-code --function-name url-shortener-shorten --zip-file fileb://lambda-deploy.zip
+
+      - name: Deploy redirect function
+        run: aws lambda update-function-code --function-name url-shortener-redirect --zip-file fileb://lambda-deploy.zip
+
+      - name: Deploy analytics function
+        run: aws lambda update-function-code --function-name url-shortener-analytics --zip-file fileb://lambda-deploy.zip
