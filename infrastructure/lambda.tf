@@ -32,7 +32,7 @@ locals {
     REDIS_PORT                       = "6379"
     SQS_QUEUE_URL                    = aws_sqs_queue.click_events.url
     BASE_SHORT_URL                   = var.base_short_url
-    FRONTEND_ORIGIN                  = var.frontend_origin
+    FRONTEND_ORIGIN                  = "https://${aws_cloudfront_distribution.frontend.domain_name}"
     LINK_EXPIRATION_DAYS             = tostring(var.link_expiration_days)
   }
 }

@@ -18,12 +18,6 @@ variable "base_short_url" {
   default     = "https://myapp.io"
 }
 
-variable "frontend_origin" {
-  description = "Allowed CORS origin for the frontend (FRONTEND_ORIGIN)."
-  type        = string
-  default     = "https://www.myapp.io"
-}
-
 variable "link_expiration_days" {
   description = "Days until a short link expires (LINK_EXPIRATION_DAYS); fixed at 7 for MVP."
   type        = number
