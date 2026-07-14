@@ -790,21 +790,21 @@ This is the principle of least privilege applied at the network level — not ju
 
 ### 16.9 Security Checklist (Pre-Deploy)
 
-Before going live, verify every item:
+> ✅ **Full audit performed post-deployment (backend was already live) — see below for what was found and fixed.** Two real gaps were caught and closed: a CORS placeholder domain that would have silently broken the frontend in Step 14, and a missing DynamoDB resource policy. One item (IAM FullAccess sprawl) was consciously deferred to its own dedicated session rather than rushed.
 
-- [ ] API Gateway throttling configured (50 req/sec default, 10 req/sec on POST /shorten)
-- [ ] SSRF protection implemented in ShortenService (scheme check, private IP block, length limit)
-- [ ] CORS configured with explicit domain, not wildcard
-- [ ] CloudFront set to redirect HTTP → HTTPS
-- [ ] ACM certificate provisioned and attached
-- [ ] Each Lambda has its own IAM role with minimum required permissions only
-- [ ] No hardcoded credentials anywhere in codebase
-- [ ] GitHub Actions secrets configured for all AWS credentials
-- [ ] `.env` confirmed in `.gitignore` and never committed
-- [ ] AWS Budget alert set at $10/month
-- [ ] ElastiCache security group allows inbound 6379 from λ redirect only
-- [ ] DynamoDB resource policy restricts access to Lambda roles only
-- [ ] Replace all managed FullAccess IAM policies with custom least-privilege policies (dev user + CI/CD user + Lambda roles)
+- [x] API Gateway throttling configured (50 req/sec default, 10 req/sec on POST /shorten)
+- [x] SSRF protection implemented in ShortenService (scheme check, private IP block, length limit)
+- [x] CORS configured with explicit domain, not wildcard — **fixed during audit:** was pointing at the placeholder `myapp.io`, now correctly set to the real CloudFront domain
+- [x] CloudFront set to redirect HTTP → HTTPS
+- [ ] ACM certificate provisioned and attached — **intentionally deferred**, tied to Step 12c-ii domain registration, not an oversight
+- [x] Each Lambda has its own IAM role with minimum required permissions only
+- [x] No hardcoded credentials anywhere in codebase
+- [x] GitHub Actions secrets configured — **exceeds original requirement**: OIDC federation means no static AWS credentials exist in GitHub at all
+- [x] `.env` confirmed in `.gitignore` and never committed
+- [x] AWS Budget alert set ($40/month, 70% threshold — revised up from the original $10 once real ElastiCache/VPC endpoint costs were understood)
+- [x] ElastiCache security group allows inbound 6379 from λ redirect only
+- [x] DynamoDB resource policy restricts access to Lambda roles only — **fixed during audit:** was never implemented despite being in this checklist; added explicit-Deny resource policies on both tables, scoped to data-plane actions only, verified root console access still works
+- [ ] Replace all managed FullAccess IAM policies with custom least-privilege policies (dev user + CI/CD user + Lambda roles) — **consciously deferred to its own dedicated session**, not rushed during the audit. List has grown since originally tracked: dev user now also carries `IAMFullAccess` and `AmazonVPCFullAccess`, added mid-project to unblock `terraform apply` errors. `IAMFullAccess` specifically is worth prioritizing first when this session happens, since it's effectively a privilege-escalation path.
 
 
 ---
