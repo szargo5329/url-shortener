@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Lo-fi cyberpunk theme (PROJECT_SPEC Section 11), tokens taken from the mockup:
+ * near-black #0d0d0f background, neon cyan #00f5ff accent, JetBrains Mono for
+ * URLs/code, Syne for UI text, sharp borders (radius 0). The palette is wired
+ * into shadcn/ui's semantic tokens so generated components inherit it.
+ */
+:root {
+  --radius: 0rem;
+
+  --background: #0d0d0f;
+  --foreground: #f0f0f0;
+  --card: #101014;
+  --card-foreground: #f0f0f0;
+  --popover: #101014;
+  --popover-foreground: #f0f0f0;
+  --primary: #00f5ff;
+  --primary-foreground: #0d0d0f;
+  --secondary: #16161a;
+  --secondary-foreground: #f0f0f0;
+  --muted: #16161a;
+  --muted-foreground: rgba(240, 240, 240, 0.45);
+  --accent: rgba(0, 245, 255, 0.08);
+  --accent-foreground: #00f5ff;
+  --destructive: #ff4d4d;
+  --destructive-foreground: #0d0d0f;
+  --border: rgba(0, 245, 255, 0.2);
+  --input: rgba(0, 245, 255, 0.3);
+  --ring: rgba(0, 245, 255, 0.7);
+
+  --font-sans: "Syne", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Neon accent as raw RGB channels, for the texture overlays below. */
+  --cyber-accent: 0 245 255;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+
+    /* Subtle 40px neon grid, matching the mockup backdrop. */
+    background-image:
+      linear-gradient(rgb(var(--cyber-accent) / 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--cyber-accent) / 0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Full-viewport scanline overlay (above the grid, below content). */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgb(var(--cyber-accent) / 0.015) 2px,
+      rgb(var(--cyber-accent) / 0.015) 4px
+    );
+  }
+}
