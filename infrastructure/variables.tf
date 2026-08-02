@@ -10,14 +10,8 @@ variable "environment" {
   default     = "dev"
 }
 
-# App config values that aren't derived from an AWS resource. Defaults match
-# application.yml; override at deploy time (e.g. the real domain).
-variable "base_short_url" {
-  description = "Base URL for generated short links (BASE_SHORT_URL)."
-  type        = string
-  default     = "https://myapp.io"
-}
-
+# App config value that isn't derived from an AWS resource. Default matches
+# application.yml; override at deploy time.
 variable "link_expiration_days" {
   description = "Days until a short link expires (LINK_EXPIRATION_DAYS); fixed at 7 for MVP."
   type        = number
