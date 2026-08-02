@@ -73,6 +73,33 @@ data "aws_iam_policy_document" "github_actions_deploy" {
       aws_lambda_function.analytics.arn,
     ]
   }
+
+  # Frontend deploy: `aws s3 sync` needs ListBucket (on the bucket) to compare
+  # what is already there, plus Put/DeleteObject (on its contents) to upload
+  # changed files and prune removed ones. Scoped to this bucket only — no bucket
+  # policy, ACL, or configuration permissions.
+  statement {
+    sid    = "SyncFrontendBucket"
+    effect = "Allow"
+    actions = [
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:ListBucket",
+    ]
+    resources = [
+      aws_s3_bucket.frontend.arn,
+      "${aws_s3_bucket.frontend.arn}/*",
+    ]
+  }
+
+  # Cache invalidation only, on this one distribution — CI/CD must never be able
+  # to change the distribution's configuration.
+  statement {
+    sid       = "InvalidateFrontendCache"
+    effect    = "Allow"
+    actions   = ["cloudfront:CreateInvalidation"]
+    resources = [aws_cloudfront_distribution.frontend.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "github_actions_deploy" {

@@ -31,9 +31,13 @@ locals {
     REDIS_HOST                       = aws_elasticache_replication_group.main.primary_endpoint_address
     REDIS_PORT                       = "6379"
     SQS_QUEUE_URL                    = aws_sqs_queue.click_events.url
-    BASE_SHORT_URL                   = var.base_short_url
-    FRONTEND_ORIGIN                  = "https://${aws_cloudfront_distribution.frontend.domain_name}"
-    LINK_EXPIRATION_DAYS             = tostring(var.link_expiration_days)
+    # Live API Gateway URL. Sourced from the API (not the stage's invoke_url):
+    # the stage depends on the route -> integration -> these functions, so
+    # referencing it here would be a dependency cycle. For the $default stage
+    # api_endpoint is the same URL. trimsuffix guards against a trailing slash.
+    BASE_SHORT_URL       = trimsuffix(aws_apigatewayv2_api.main.api_endpoint, "/")
+    FRONTEND_ORIGIN      = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+    LINK_EXPIRATION_DAYS = tostring(var.link_expiration_days)
   }
 }
 
