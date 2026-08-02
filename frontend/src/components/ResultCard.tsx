@@ -82,8 +82,8 @@ function Meta({
 }) {
   return (
     <div className={cn('min-w-0', className)}>
-      <dt className="font-mono text-[9px] uppercase tracking-[0.15em] text-primary/40">{label}</dt>
-      <dd className="truncate font-mono text-xs text-foreground/70">{value}</dd>
+      <dt className="font-mono text-[10px] uppercase tracking-[0.15em] text-primary/40">{label}</dt>
+      <dd className="truncate font-mono text-sm text-foreground/70">{value}</dd>
     </div>
   )
 }

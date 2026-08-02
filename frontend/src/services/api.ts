@@ -1,10 +1,16 @@
 /**
- * API types and client for the URL shortener backend.
+ * API client for the URL shortener backend.
  *
- * NOTE: `shortenUrl` is currently a MOCK that returns fake data after a short
- * delay so the UI flow (submit → loading → result) can be exercised. Real API
- * integration (fetch to VITE_API_BASE_URL) replaces the body in the next step.
+ * The base URL comes from VITE_API_BASE_URL: in development that is the Vite
+ * dev-server proxy path (`/api`), which keeps requests same-origin and avoids
+ * CORS; in production it is the API Gateway URL, called directly from the
+ * CloudFront origin the backend's CORS policy allows.
+ *
+ * Only POST /shorten is fetched here. GET /{code} is a plain <a> link — a normal
+ * top-level browser navigation, which CORS does not apply to.
  */
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 /** Response shape of `POST /shorten` (snake_case, matching the backend JSON). */
 export interface ShortenResponse {
@@ -15,19 +21,35 @@ export interface ShortenResponse {
   expires_at: string | null
 }
 
-/** Mock: pretends to shorten a URL, resolving with fake data after ~900ms. */
+/** Error body shape produced by the backend's GlobalExceptionHandler. */
+interface ApiErrorBody {
+  error?: string
+}
+
+/**
+ * Shortens a long URL.
+ *
+ * @throws Error carrying the backend's own `error` message on a non-2xx response.
+ */
 export async function shortenUrl(longUrl: string): Promise<ShortenResponse> {
-  await new Promise((resolve) => setTimeout(resolve, 900))
+  const response = await fetch(`${API_BASE_URL}/shorten`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ long_url: longUrl }),
+  })
 
-  const code = Math.random().toString(36).slice(2, 9)
-  const now = new Date()
-  const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-
-  return {
-    short_code: code,
-    short_url: `https://shrt.io/${code}`,
-    long_url: longUrl,
-    created_at: now.toISOString(),
-    expires_at: expires.toISOString(),
+  if (!response.ok) {
+    // Surface the backend's actual message ({ "error": "..." }) rather than a
+    // generic one. Fall back only if the body is missing or unparseable.
+    let message = `Request failed (${response.status})`
+    try {
+      const body = (await response.json()) as ApiErrorBody
+      if (body?.error) message = body.error
+    } catch {
+      // Non-JSON body — keep the status-based fallback.
+    }
+    throw new Error(message)
   }
+
+  return (await response.json()) as ShortenResponse
 }

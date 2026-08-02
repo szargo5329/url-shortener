@@ -20,8 +20,9 @@ function App() {
       setResult(res)
       setStatus('success')
       setCount((c) => c + 1)
-    } catch {
-      setErrorMessage('Something went wrong. Please try again.')
+    } catch (err) {
+      // Show the backend's own message (from GlobalExceptionHandler) when present.
+      setErrorMessage(err instanceof Error ? err.message : 'Request failed. Please try again.')
       setStatus('error')
     }
   }
@@ -35,22 +36,22 @@ function App() {
       {/* Full-width container: nav spans edge-to-edge, main is centered. */}
       <div className="flex min-h-screen flex-col px-6 py-8 sm:px-10">
         <nav className="mb-16 flex items-center justify-between">
-          <div className="font-mono text-[13px] uppercase tracking-[0.12em] text-primary">
+          <div className="font-mono text-base uppercase tracking-[0.12em] text-primary lg:text-lg xl:text-xl">
             SHR<span className="text-primary/40">.</span>T
           </div>
-          <div className="border border-primary/20 px-2 py-[3px] font-mono text-[10px] tracking-[0.15em] text-primary/40">
+          <div className="border border-primary/20 px-2.5 py-1 font-mono text-xs tracking-[0.15em] text-primary/40 lg:px-3 lg:py-1.5 lg:text-sm">
             v1.0.0 — BETA
           </div>
         </nav>
 
-        <main className="mx-auto w-full max-w-[560px] text-center lg:max-w-3xl xl:max-w-4xl">
+        <main className="mx-auto mt-8 w-full max-w-[560px] text-center lg:mt-12 lg:max-w-3xl xl:max-w-4xl">
           <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-primary/50 lg:mb-4 lg:text-xs">
             // url compression utility
           </p>
           <h1 className="mb-2 font-sans text-[28px] font-bold leading-tight tracking-tight text-foreground lg:mb-3 lg:text-[38px] xl:text-[46px]">
-            Make your links
+            Paste. Shrink.
             <br />
-            <em className="not-italic text-primary">cut through the noise</em>
+            <em className="not-italic text-primary">Done.</em>
           </h1>
           <p className="mb-8 text-[13px] tracking-[0.02em] text-foreground/40 lg:mb-10 lg:text-base xl:mb-12 xl:text-lg">
             Paste any URL. Get a short, clean link instantly.

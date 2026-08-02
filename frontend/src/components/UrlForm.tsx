@@ -1,6 +1,30 @@
 import { useState, type FormEvent } from 'react'
 import { cn } from '@/lib/utils'
 
+/**
+ * Fast UX-only shape check on the entered URL, using the browser's URL parser
+ * rather than a hand-rolled regex. Returns an error message, or null if it looks
+ * fine.
+ *
+ * NOT a security control — the real validation (SSRF blocking, private-IP and
+ * length checks) lives in the backend's UrlService and is what actually protects
+ * the service. This only saves the user a round-trip on obvious typos.
+ */
+function validateUrl(value: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    return 'Enter a valid URL, including http:// or https://'
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'Only http:// and https:// URLs are supported.'
+  }
+
+  return null
+}
+
 interface UrlFormProps {
   /** Called with the trimmed URL on a valid submit. Awaited to drive loading. */
   onSubmit: (url: string) => Promise<void>
@@ -22,6 +46,12 @@ export function UrlForm({ onSubmit }: UrlFormProps) {
     const trimmed = value.trim()
     if (!trimmed) {
       setError('Enter a URL to shorten.')
+      return
+    }
+
+    const invalid = validateUrl(trimmed)
+    if (invalid) {
+      setError(invalid)
       return
     }
 
