@@ -39,6 +39,20 @@ resource "aws_apigatewayv2_route" "redirect" {
   target    = "integrations/${aws_apigatewayv2_integration.redirect.id}"
 }
 
+# CORS preflight for POST /shorten. Without an explicit route the browser's
+# OPTIONS request 404s at API Gateway before reaching Lambda, so Spring's
+# @CrossOrigin never gets to answer it and the real POST is blocked. Routed to
+# the SAME shorten integration so Spring handles the preflight (Section 6, gap 3
+# — CORS lives in Spring, not at the API Gateway layer).
+#
+# GET /{code} needs no equivalent: browsers do not preflight top-level
+# navigations; only the JSON POST triggers one.
+resource "aws_apigatewayv2_route" "shorten_options" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "OPTIONS /shorten"
+  target    = "integrations/${aws_apigatewayv2_integration.shorten.id}"
+}
+
 # --- Stage + throttling (Section 16.1) --------------------------------------
 # CORS is intentionally NOT configured here — UrlController's tested @CrossOrigin
 # handles CORS entirely in Spring (Section 16.3). Doing it in both layers risks
