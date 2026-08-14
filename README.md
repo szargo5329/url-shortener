@@ -11,7 +11,7 @@
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Status](https://img.shields.io/badge/Status-Backend%20Live%20%7C%20Frontend%20In%20Progress-brightgreen)
+![Status](https://img.shields.io/badge/Status-Live-brightgreen)
 
 </div>
 
@@ -21,7 +21,7 @@
 
 SHR.T shortens long URLs into compact, shareable links — architected the way you'd design a system meant to handle millions of users, not a weekend toy. Multi-AZ high availability, async event-driven analytics, cache-aside caching, and defense against SSRF attacks are all built in from day one.
 
-**The backend is live in AWS right now.** Every piece of infrastructure — Lambda, API Gateway, DynamoDB, ElastiCache, SQS, VPC, IAM — is provisioned entirely through Terraform, and every push to `main` auto-deploys real application code via a GitHub Actions pipeline authenticated through OIDC federation (no long-lived AWS credentials stored anywhere).
+**The entire product is live right now** — frontend, backend, and every piece of AWS infrastructure between them, all provisioned via Terraform and deployed through a fully automated CI/CD pipeline authenticated via OIDC federation.
 
 <div align="center">
   <img src="./assets/url-shortener-mockup.png" alt="SHR.T UI Mockup" width="700">
@@ -40,12 +40,13 @@ SHR.T shortens long URLs into compact, shareable links — architected the way y
 - Multi-AZ ElastiCache (Redis) with auto-failover for sub-millisecond redirect lookups
 - Async, event-driven click analytics via SQS — redirects never wait on tracking
 - VPC scoped down to exactly what needs network isolation, with VPC Endpoints (not a NAT Gateway) so the VPC-attached Lambda can still reach DynamoDB and SQS
-- SSRF-protected input validation, least-privilege IAM, CORS locked to a single origin
-- Every AWS resource — nine categories in total — provisioned via Terraform, zero manual console clicks
-- CI/CD deploys real code via GitHub OIDC federation — no static AWS credentials in CI/CD, ever
-- CloudWatch alarms (Lambda errors, API Gateway 5xx, DynamoDB throttling) + SNS email alerts, plus an AWS Budget alert — deploying without failure or cost visibility was treated as a real gap, not a nice-to-have
+- SSRF-protected input validation, least-privilege IAM, CORS locked to a single origin — including a real CORS preflight gap found and fixed only after deploying to the live CloudFront domain
+- React + TypeScript frontend, styled to a lo-fi cyberpunk aesthetic, served from S3 via CloudFront
+- Every AWS resource — nine categories in total — provisioned via Terraform, zero manual resource creation
+- CI/CD deploys both backend (Lambda) and frontend (S3 + CloudFront) via GitHub OIDC federation — no static AWS credentials in CI/CD, ever
+- CloudWatch alarms (Lambda errors, API Gateway 5xx, DynamoDB throttling) + SNS email alerts, plus an AWS Budget alert
 
-Full design rationale — including why 302 over 301, why cache-aside over write-through, why DynamoDB over a relational store, and every real-world gap caught and fixed along the way (IAM permissions, VPC networking, Lambda packaging, OIDC trust policies) — is documented in [`PROJECT_SPEC.md`](./PROJECT_SPEC.md).
+Full design rationale — including every real gap caught and fixed along the way (IAM permissions, VPC networking, Lambda packaging, OIDC trust policies, a CORS preflight route only discovered on real deployment) — is documented in [`PROJECT_SPEC.md`](./PROJECT_SPEC.md).
 
 ---
 
@@ -54,33 +55,26 @@ Full design rationale — including why 302 over 301, why cache-aside over write
 | Layer | Technology |
 |---|---|
 | **Backend** | Java 21, Spring Boot 3, Gradle (Shadow plugin for Lambda packaging) |
-| **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui *(in progress)* |
+| **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
 | **Database** | DynamoDB (URL mappings + click events) |
 | **Cache** | ElastiCache (Redis), Multi-AZ with auto-failover |
 | **Messaging** | SQS (async analytics pipeline) |
 | **Compute** | AWS Lambda (3 functions: shorten, redirect, analytics) |
 | **Networking** | API Gateway (HTTP API), CloudFront, VPC, VPC Endpoints |
 | **IaC** | Terraform — all 9 AWS resource categories |
-| **CI/CD** | GitHub Actions, OIDC federation (no static credentials) |
+| **CI/CD** | GitHub Actions, OIDC federation (no static credentials), backend + frontend pipelines |
 | **Monitoring** | CloudWatch Alarms + SNS, AWS Budget alerts |
 
 ---
 
-## Live Backend
+## Live
 
-The backend API is deployed and publicly reachable right now. Example, verified working:
+The full product — frontend and backend — is deployed and publicly reachable right now:
 
-```bash
-curl -X POST https://<api-invoke-url>/shorten \
-  -H "Content-Type: application/json" \
-  -d '{"long_url":"https://example.com"}'
-# → 201 Created, real short code, real DynamoDB write
+- **App:** served via CloudFront (custom domain pending, see Project Status)
+- **API:** `POST /shorten` and `GET /{code}`, both live on API Gateway
 
-curl https://<api-invoke-url>/{short_code}
-# → 302 Found, redirects to the original URL, click event recorded async via SQS
-```
-
-*(Custom domain pending — see Project Status below. Currently served on AWS's default API Gateway/CloudFront domains.)*
+Every layer is real: real DynamoDB writes, real Multi-AZ Redis caching, real async click analytics via SQS, real Lambda execution behind a real CDN.
 
 ---
 
@@ -125,21 +119,18 @@ Returns `302 Found` with a `Location` header pointing to the original URL. Uses 
 ## Project Status
 
 - [x] System design & architecture diagram
-- [x] Backend: data models, repositories, services, controllers
-- [x] Backend: SQS async analytics pipeline
-- [x] Backend: SSRF protection, centralized error handling
-- [x] Backend: fixed 7-day link expiration
+- [x] Backend: full implementation, SQS async analytics, SSRF protection, fixed 7-day expiration
 - [x] Unit tests — 6 test classes, 44 tests, zero real AWS/Redis dependencies
-- [x] CI/CD pipeline (GitHub Actions) — build + test on every push
 - [x] Infrastructure as Code — all 9 AWS resource categories provisioned via Terraform
-- [x] AWS deployment — **backend live and verified working end-to-end**
-- [x] CI/CD deploy — OIDC federation, auto-deploys real code on push to `main`
+- [x] CI/CD — backend and frontend pipelines, OIDC federation, auto-deploy on push to `main`
 - [x] Monitoring — CloudWatch alarms + SNS, AWS Budget alerts
+- [x] Security audit — CORS, DynamoDB resource policies, IAM least-privilege review
+- [x] Frontend — built, styled, deployed, fully wired to the real live API
+- [x] **End-to-end verification — complete, live, and confirmed working on the real deployed URL**
 - [ ] Custom domain (Route 53 + ACM) *(intentionally deferred)*
-- [ ] Frontend implementation *(in progress)*
-- [ ] Full end-to-end verification via frontend
+- [ ] IAM policy tightening — dev user FullAccess → least-privilege *(its own dedicated session)*
 
-Following along? The full build log — every design decision, every AWS concept learned, every real gap caught and fixed along the way — is in [`PROJECT_SPEC.md`](./PROJECT_SPEC.md).
+The full build log — every design decision, every AWS concept learned, every real gap caught and fixed along the way — is in [`PROJECT_SPEC.md`](./PROJECT_SPEC.md).
 
 ---
 
@@ -148,13 +139,17 @@ Following along? The full build log — every design decision, every AWS concept
 ```bash
 # Clone the repo
 git clone https://github.com/szargo5329/url-shortener.git
-cd url-shortener/backend
+cd url-shortener
 
-# Build and run tests
+# Backend
+cd backend
 ./gradlew clean test
-
-# Build the Lambda-deployable artifact
 ./gradlew shadowJar
+
+# Frontend
+cd ../frontend
+npm install
+npm run dev
 ```
 
 Infrastructure is managed via Terraform in `infrastructure/` — see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) Section 19 for the full setup and deployment process.
