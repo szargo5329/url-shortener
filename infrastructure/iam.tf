@@ -23,7 +23,7 @@
 # roles. Referenced by all three roles' assume_role_policy below.
 # Fundamentally: this just *builds a JSON document* — a data source creates nothing
 # in AWS on its own; the JSON isn't used until a role references it.
-data "aws_iam_policy_document" "lambda_assume_role" {
+data "aws_iam_policy_document" "lambda_trust_doc" {
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRole"]
@@ -53,7 +53,7 @@ locals {
 # No permissions are attached here.
 resource "aws_iam_role" "shorten_lambda_role" {
   name               = "url-shortener-shorten-lambda"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust_doc.json
 }
 
 # MANAGED-policy ATTACHMENT (not inline): grants CloudWatch Logs access. Every Lambda
@@ -69,7 +69,7 @@ resource "aws_iam_role_policy_attachment" "shorten_lambda_basic_execution" {
 # pre-save collision check; PutItem stores the new short-code mapping.
 # Fundamentally: another JSON-builder data source — produces policy text, attaches
 # nothing on its own.
-data "aws_iam_policy_document" "shorten_dynamodb" {
+data "aws_iam_policy_document" "shorten_lambda_dynamodb_access_doc" {
   statement {
     sid    = "UrlMappingsReadWrite"
     effect = "Allow"
@@ -85,10 +85,10 @@ data "aws_iam_policy_document" "shorten_dynamodb" {
 # reusable managed policy because it's a one-off grant used by nothing else.
 # Fundamentally: this writes that JSON straight onto the role as an inline policy —
 # the grant exists only on shorten_lambda_role.
-resource "aws_iam_role_policy" "shorten_dynamodb" {
+resource "aws_iam_role_policy" "shorten_lambda_dynamodb_access" {
   name   = "url-shortener-shorten-dynamodb"
   role   = aws_iam_role.shorten_lambda_role.id
-  policy = data.aws_iam_policy_document.shorten_dynamodb.json
+  policy = data.aws_iam_policy_document.shorten_lambda_dynamodb_access_doc.json
 }
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ resource "aws_iam_role_policy" "shorten_dynamodb" {
 # creates the redirect IAM role, names it 
 resource "aws_iam_role" "redirect_lambda_role" {
   name               = "url-shortener-redirect-lambda"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust_doc.json
 }
 
 # MANAGED-policy attachment: CloudWatch Logs access, the same baseline every role gets.
@@ -124,7 +124,7 @@ resource "aws_iam_role_policy_attachment" "redirect_lambda_vpc_access" {
 # JSON for redirect's custom PERMISSION policy: read one mapping from DynamoDB, and
 # publish a click event to the SQS queue (fire-and-forget analytics).
 # Fundamentally: JSON-builder only — two statements of allowed actions; creates no AWS resource.
-data "aws_iam_policy_document" "redirect_policy" {
+data "aws_iam_policy_document" "redirect_lambda_access_doc" {
   statement {
     sid       = "UrlMappingsRead"
     effect    = "Allow"
@@ -142,10 +142,10 @@ data "aws_iam_policy_document" "redirect_policy" {
 
 # INLINE policy holding the two custom grants above, scoped to the redirect role only.
 # Fundamentally: embeds that JSON into redirect_lambda_role as an inline policy.
-resource "aws_iam_role_policy" "redirect_policy" {
+resource "aws_iam_role_policy" "redirect_lambda_access" {
   name   = "url-shortener-redirect-access"
   role   = aws_iam_role.redirect_lambda_role.id
-  policy = data.aws_iam_policy_document.redirect_policy.json
+  policy = data.aws_iam_policy_document.redirect_lambda_access_doc.json
 }
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ resource "aws_iam_role_policy" "redirect_policy" {
 # Fundamentally: creates the analytics IAM role — name + trust policy only.
 resource "aws_iam_role" "analytics_lambda_role" {
   name               = "url-shortener-analytics-lambda"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust_doc.json
 }
 
 # MANAGED-policy attachment: CloudWatch Logs access.
@@ -170,7 +170,7 @@ resource "aws_iam_role_policy_attachment" "analytics_lambda_basic_execution" {
 # JSON for analytics' custom PERMISSION policy: write click records to click-events,
 # and receive/delete/inspect messages on the SQS queue it consumes from.
 # Fundamentally: JSON-builder only — the analytics grants as text; nothing created.
-data "aws_iam_policy_document" "analytics_policy" {
+data "aws_iam_policy_document" "analytics_lambda_access_doc" {
   statement {
     sid       = "ClickEventsWrite"
     effect    = "Allow"
@@ -192,8 +192,8 @@ data "aws_iam_policy_document" "analytics_policy" {
 
 # INLINE policy: the DynamoDB-write + SQS-consume grants above, analytics role only.
 # Fundamentally: embeds that JSON into analytics_lambda_role as an inline policy.
-resource "aws_iam_role_policy" "analytics_policy" {
+resource "aws_iam_role_policy" "analytics_lambda_access" {
   name   = "url-shortener-analytics-access"
   role   = aws_iam_role.analytics_lambda_role.id
-  policy = data.aws_iam_policy_document.analytics_policy.json
+  policy = data.aws_iam_policy_document.analytics_lambda_access_doc.json
 }

@@ -3,16 +3,37 @@
 
 ---
 
+## 0. Current Status (read this first)
+
+**The project is complete and live.** Frontend, backend, and all AWS infrastructure are deployed and verified working end-to-end on real infrastructure — not locally, not mocked.
+
+| Area | Status |
+|---|---|
+| Backend (all layers, SQS analytics, SSRF protection, 7-day expiration) | ✅ Complete |
+| Unit tests (6 classes, 44 tests) | ✅ Complete |
+| Infrastructure — 9 AWS resource categories via Terraform | ✅ Complete |
+| CI/CD — backend + frontend, OIDC federation, auto-deploy on `main` | ✅ Complete |
+| Monitoring — CloudWatch alarms + SNS, AWS Budget alert | ✅ Complete |
+| Security audit (Section 16.9) | ✅ 11 of 13 items complete |
+| Frontend — built, deployed, live | ✅ Complete |
+| End-to-end verification on the real deployed URL | ✅ Complete |
+| Custom domain (Route 53 + ACM) | ⬜ Deferred by choice — Step 12c-ii |
+| IAM dev-user FullAccess → least-privilege | ⬜ Deferred by choice — own session |
+
+**Remaining work is two deliberately deferred items only.** Neither blocks the product from working; both are documented decisions, not oversights.
+
+---
+
 ## 1. Project Overview
 
-A production-quality URL shortener built on AWS serverless infrastructure. Designed as a backend engineering portfolio piece with interview-scale system design. The application is fully functional and deployed — not a toy.
+A production-quality URL shortener built on AWS serverless infrastructure. Designed as a backend engineering portfolio piece with interview-scale system design. **STATUS: fully built, deployed, and live** — frontend, backend, and all infrastructure verified working end-to-end on real AWS.
 
-**Domain setup (placeholder — replace with your actual domain name when chosen):**
-- Single `.io` domain strategy — one domain, two purposes:
-  - `www.myapp.io` — the frontend where users create short links
-  - `myapp.io/{code}` — the short link redirect path
-- Both routes handled by Route 53, split to CloudFront (frontend) and API Gateway (short links)
-- Set actual domain via environment variables at deploy time — no hardcoded domain in code
+**Domain setup — CURRENT STATE (no custom domain purchased yet):**
+- Frontend is served from the default CloudFront domain (`*.cloudfront.net`)
+- Short links resolve via the default API Gateway invoke URL (`*.execute-api.us-east-1.amazonaws.com`)
+- Both are set dynamically from Terraform resource attributes, never hardcoded
+
+**Planned (Step 12c-ii, deferred):** register a real `.io`-style domain and point `www.<domain>` → CloudFront and `<domain>/{code}` → API Gateway via Route 53, with an ACM certificate. Candidates discussed: `shrt.link`, `shrt.xyz`. `myapp.io` was only ever a placeholder and appears nowhere in live config.
 
 **Scale:** Small personal project (~10 users) but architected and implemented as if it could scale to millions.
 
@@ -79,7 +100,7 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
 - **Language:** Java 21
 - **Framework:** Spring Boot 3.x
 - **Build tool:** Gradle (Kotlin DSL — `build.gradle.kts`)
-- **Deployment:** AWS Lambda via Spring Cloud Function or `aws-serverless-java-container`
+- **Deployment:** AWS Lambda via `aws-serverless-java-container-springboot3`, packaged as a flat uber-jar by the Gradle Shadow plugin (see Section 14's packaging gaps). Handler classes live in `handler/` — `StreamLambdaHandler` (shorten + redirect) and `AnalyticsLambdaHandler` (SQS-triggered analytics).
 - **Key dependencies:**
   - `spring-boot-starter-web`
   - `spring-boot-starter-validation` (for URL validation)
@@ -93,18 +114,18 @@ A production-quality URL shortener built on AWS serverless infrastructure. Desig
 - **Framework:** React 18 + TypeScript
 - **Build tool:** Vite
 - **Styling:** Tailwind CSS + shadcn/ui
-- **HTTP client:** Axios or native fetch
+- **HTTP client:** native `fetch` (Axios not used)
 - **Deployment:** AWS S3 + CloudFront
 
 ### Frontend Design Approach
-- AI-generated via v0 (Vercel) for initial component scaffolding, then refined in Claude Code
+- Built entirely in Claude Code against the mockup reference files in `assets/` (v0/Vercel was originally considered but not used)
 - Design aesthetic: **lo-fi / cyberpunk** — dark background, neon accent colors, monospace typography, subtle grid/scanline texture. Distinctive and memorable, not generic AI purple-gradient-on-white.
 - Avoid: Inter, Roboto, Arial, generic purple gradients, cookie-cutter layouts
 - Use: CSS variables for theming, micro-animations, cohesive dark palette with sharp accent color
 
 ### Infrastructure (AWS)
 - **IaC tool:** Terraform — manages all core application infrastructure (see Section 19)
-- **Manually provisioned (console):** AWS Budget alert (urgent — see Step 12c-i), domain registration and ACM certificate (deferred to its own session — see Step 12c-ii) — see Section 19.2 for full rationale
+- **Manually provisioned (console):** AWS Budget alert (COMPLETE — $40/month, 70% threshold), domain registration and ACM certificate (still deferred — see Step 12c-ii) — see Section 19.2 for full rationale
 See Section 6 for full architecture details.
 
 ---
@@ -334,16 +355,24 @@ DYNAMODB_TABLE_NAME=url-mappings
 DYNAMODB_CLICK_EVENTS_TABLE_NAME=click-events
 REDIS_HOST=<elasticache-endpoint>
 REDIS_PORT=6379
-BASE_SHORT_URL=https://myapp.io
+BASE_SHORT_URL=<derived from API Gateway — see note below>
 SQS_QUEUE_URL=<sqs-queue-url>
-FRONTEND_ORIGIN=https://www.myapp.io
+FRONTEND_ORIGIN=<derived from CloudFront — see note below>
 LINK_EXPIRATION_DAYS=7
 ```
 
-### Frontend (.env)
+> **Note:** `BASE_SHORT_URL` and `FRONTEND_ORIGIN` are no longer static placeholder values. Both are set dynamically in `lambda.tf` from live Terraform resource attributes — `BASE_SHORT_URL` from `aws_apigatewayv2_api.main.api_endpoint`, `FRONTEND_ORIGIN` from `aws_cloudfront_distribution.frontend.domain_name`. This was a fix applied after both were found to still contain the fictional `myapp.io` placeholder: `FRONTEND_ORIGIN` during the security audit (it would have blocked all frontend API calls), and `BASE_SHORT_URL` during frontend integration (displayed short links weren't clickable). Neither should ever be hardcoded again.
+
+### Frontend (.env files)
 ```
-VITE_API_BASE_URL=https://api.myapp.io
+# .env.development (gitignored) — used by `npm run dev`, routes through the Vite proxy
+VITE_API_BASE_URL=/api
+
+# .env.production (committed — the API URL is public, baked into the shipped bundle anyway)
+VITE_API_BASE_URL=<real API Gateway invoke URL>
 ```
+
+> **Local dev CORS note:** `.env.development` points at `/api` rather than the real API URL because `vite.config.ts` proxies `/api` to API Gateway server-side, keeping browser requests same-origin so CORS never applies locally. The proxy also explicitly rewrites the outgoing `Origin` header to match the real CloudFront origin — `changeOrigin: true` only rewrites `Host`, and Spring's `@CrossOrigin` rejects the real request (not just preflight) on an untrusted `Origin`.
 
 ---
 
@@ -382,8 +411,8 @@ Claude Code should scaffold in this order:
     - 12c-ii. **Domain registration + ACM cert + Route 53 records — genuinely fine to keep deferred** until a domain name is chosen and purchased. Its own dedicated session, separate from everything else. **STATUS: DEFERRED (intentional).**
     - 12d. **CloudWatch monitoring & alarms (minimal MVP scope)** — added after 12b, since it requires Lambda and API Gateway to already exist. See Section 20 for full details. Not deferred to V2 — deploying without any failure notification was identified as a real production gap, not a nice-to-have. **STATUS: COMPLETE.**
 13. **Wire CI/CD deploy step** — now that infrastructure exists, add the Lambda deploy step to `backend.yml`. From this point every push to `main` auto-deploys real code via OIDC federation (Section 14). **STATUS: COMPLETE — verified working end-to-end via live `curl` tests: `POST /shorten` returns real 201 responses, `GET /{code}` returns real 302 redirects, click events confirmed landing in the `click-events` DynamoDB table via the full async SQS → analytics Lambda pipeline.** `frontend.yml` deferred to Step 14, once a frontend exists to deploy.
-14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11. **STATUS: NOT STARTED.**
-15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table. **STATUS: PARTIALLY COMPLETE — backend flow fully verified via curl (Step 13); frontend-driven verification pending Step 14.**
+14. **Frontend scaffold** — Vite + React + TS + Tailwind + shadcn/ui, lo-fi/cyberpunk aesthetic, UrlForm and ResultCard components wired to the real deployed API. See Section 11. **STATUS: COMPLETE — deployed and live via CloudFront, real API integration confirmed working end-to-end.**
+15. **End-to-end verification** — manually test the full flow: shorten a URL via the frontend, click the short link, confirm 302 redirect works, confirm DynamoDB record exists, confirm Redis cache is populated, confirm click event appears in click-events table. **STATUS: COMPLETE — verified live on the real CloudFront URL, not just curl. One additional gap found and fixed during this verification: API Gateway had no `OPTIONS /shorten` route, so the browser's CORS preflight 404'd before ever reaching Spring's `@CrossOrigin` handler. This only surfaced on the real deployed site — local dev's Vite proxy made requests same-origin, so no preflight was ever triggered there. Fixed by adding an explicit `OPTIONS /shorten` route routed to the same Lambda integration, letting Spring answer the preflight as originally designed in Section 6.**
 
 ---
 
